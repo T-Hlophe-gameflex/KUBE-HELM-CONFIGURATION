@@ -13,47 +13,82 @@ make kibana   # Access Kibana at http://localhost:5601
 
 ## Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                        DEPLOYMENT LAYER                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  Ansible Playbooks  ──────> Helm Charts ──────> Kubernetes          │
-│  (Orchestration)            (Individual)         (Kind/Kubespray)    │
-│                                                                       │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │
-                    ┌───────────┴────────────┐
-                    │                        │
-        ┌───────────▼──────────┐  ┌─────────▼────────────┐
-        │   OBSERVABILITY      │  │   APPLICATION LAYER  │
-        │   (Namespace: monitoring) │   (Namespace: backend/database) │
-        ├──────────────────────┤  ├──────────────────────┤
-        │                      │  │                      │
-        │  Elasticsearch ───┐  │  │  Order Service ────┐ │
-        │       ▲           │  │  │       │            │ │
-        │       │           ▼  │  │       ▼            │ │
-        │  Logstash ───> Kibana│  │  PostgreSQL        │ │
-        │       ▲              │  │       ▲            │ │
-        │       │              │  │       │            │ │
-        │  Filebeat ───────────┘  │  User Service ─────┘ │
-        │  (DaemonSet)            │                      │
-        └──────────────────────┘  └──────────────────────┘
-                    │
-        ┌───────────▼──────────────────────┐
-        │   INFRASTRUCTURE LAYER           │
-        │   (Namespace: metallb-system)    │
-        ├──────────────────────────────────┤
-        │                                  │
-        │  MetalLB LoadBalancer            │
-        │  IP Pool: 172.18.255.200-250     │
-        │                                  │
-        │  ┌────────────────────────────┐  │
-        │  │ External IPs Assigned:     │  │
-        │  │ • Elasticsearch: .200      │  │
-        │  │ • Kibana: .202             │  │
-        │  └────────────────────────────┘  │
-        └──────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "Deployment Layer"
+        A[Ansible Playbooks] --> B[Helm Charts]
+        B --> C[Kubernetes Cluster]
+    end
+    
+    subgraph "Kubernetes Cluster"
+        subgraph "monitoring namespace"
+            ES[Elasticsearch<br/>:9200]
+            KB[Kibana<br/>:5601]
+            LS[Logstash<br/>:5044]
+            FB[Filebeat<br/>DaemonSet]
+            
+            FB --> LS
+            LS --> ES
+            ES --> KB
+        end
+        
+        subgraph "backend namespace"
+            OS[Order Service<br/>:8080]
+            US[User Service<br/>:8081]
+        end
+        
+        subgraph "database namespace"
+            PG[PostgreSQL<br/>:5432]
+        end
+        
+        subgraph "metallb-system namespace"
+            MLB[MetalLB<br/>LoadBalancer<br/>172.18.255.200-250]
+        end
+        
+        OS --> PG
+        US --> PG
+        OS -.-> FB
+        US -.-> FB
+        
+        MLB --> ES
+        MLB --> KB
+    end
+    
+    C --> monitoring
+    C --> backend
+    C --> database
+    C --> metallb-system
+    
+    classDef observability fill:#e1f5fe
+    classDef application fill:#f3e5f5
+    classDef database fill:#e8f5e8
+    classDef infrastructure fill:#fff3e0
+    
+    class ES,KB,LS,FB observability
+    class OS,US application
+    class PG database
+    class MLB infrastructure
+```
+
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Kibana
+    participant Elasticsearch
+    participant Logstash
+    participant Filebeat
+    participant Apps as Applications<br/>(Order/User Services)
+    
+    Apps->>Filebeat: Generate logs
+    Filebeat->>Logstash: Ship log data
+    Logstash->>Logstash: Process & transform
+    Logstash->>Elasticsearch: Index processed logs
+    User->>Kibana: Access dashboard
+    Kibana->>Elasticsearch: Query log data
+    Elasticsearch->>Kibana: Return results
+    Kibana->>User: Display visualizations
 ```
 
 ## Project Structure
