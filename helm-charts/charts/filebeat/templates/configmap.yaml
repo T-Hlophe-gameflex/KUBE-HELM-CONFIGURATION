@@ -1,0 +1,52 @@
+{{- if .Values.filebeat.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-filebeat-config
+  namespace: monitoring
+  labels:
+    app: filebeat
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+data:
+  filebeat.yml: |
+    filebeat.autodiscover:
+      providers:
+        - type: kubernetes
+          node: ${NODE_NAME}
+          hints.enabled: true
+          hints.default_config:
+            type: container
+            paths:
+              - /var/log/containers/*${data.kubernetes.container.id}.log
+
+    processors:
+      - add_kubernetes_metadata:
+          host: ${NODE_NAME}
+          matchers:
+          - logs_path:
+              logs_path: "/var/log/containers/"
+
+    # Configure what to do with the logs
+    output.logstash:
+      hosts: ["{{ .Values.filebeat.logstashHost }}:{{ .Values.filebeat.logstashPort }}"]
+
+    # Alternative: Output directly to Elasticsearch
+    # output.elasticsearch:
+    #   hosts: ["{{ .Values.filebeat.elasticsearchHost }}:{{ .Values.filebeat.elasticsearchPort }}"]
+    #   index: "filebeat-%{+yyyy.MM.dd}"
+
+    setup.template.name: "filebeat"
+    setup.template.pattern: "filebeat-*"
+    setup.template.enabled: true
+    setup.template.settings:
+      index.number_of_shards: 1
+      index.codec: best_compression
+
+    logging.level: info
+    logging.to_files: true
+    logging.files:
+      path: /var/log/filebeat
+      name: filebeat
+      keepfiles: 7
+      permissions: 0644
+{{- end }}

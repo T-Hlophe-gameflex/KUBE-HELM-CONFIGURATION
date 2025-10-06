@@ -1,0 +1,19 @@
+---
+# Validate Cluster
+- name: Check cluster connectivity
+  command: kubectl cluster-info
+  register: cluster_info
+  changed_when: false
+  
+- name: Display cluster info
+  debug:
+    var: cluster_info.stdout_lines
+
+- name: Check all pods status
+  command: kubectl get pods --all-namespaces
+  register: all_pods
+  changed_when: false
+  
+- name: Display pods status
+  debug:
+    var: all_pods.stdout_lines

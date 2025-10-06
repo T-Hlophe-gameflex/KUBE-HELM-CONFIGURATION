@@ -1,0 +1,20 @@
+apiVersion: v2
+name: filebeat
+description: Filebeat for log collection in ELK Stack
+type: application
+version: 1.0.0
+appVersion: "8.10.4"
+dependencies:
+  - name: elasticsearch
+    version: "1.0.0"
+    repository: "file://../elasticsearch"
+  - name: logstash
+    version: "1.0.0"
+    repository: "file://../logstash"
+keywords:
+  - filebeat
+  - logging
+  - collection
+  - elk
+maintainers:
+  - name: Platform Team

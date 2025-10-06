@@ -1,0 +1,15 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-logstash-config
+  namespace: monitoring
+  labels:
+    app: logstash
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+data:
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    path.config: /usr/share/logstash/pipeline
+    xpack.monitoring.enabled: false
+{{- end }}

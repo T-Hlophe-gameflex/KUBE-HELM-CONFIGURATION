@@ -1,0 +1,348 @@
+# Kibana Configuration Values
+# This file contains all configuration specific to Kibana
+
+kibana:
+  # Enable/disable Kibana deployment
+  enabled: true
+  
+  # Number of Kibana replicas
+  replicaCount: 1
+  
+  # Image configuration
+  image:
+    repository: docker.elastic.co/kibana/kibana
+    tag: "8.10.4"
+    pullPolicy: IfNotPresent
+  
+  # Elasticsearch connection
+  elasticsearch:
+    hosts: ["http://elk-stack-platform-elasticsearch:9200"]
+    username: ""
+    password: ""
+    
+    # SSL/TLS configuration
+    ssl:
+      enabled: false
+      certificateAuthorities: []
+      verificationMode: "certificate"
+  
+  # Kibana server configuration
+  server:
+    host: "0.0.0.0"
+    port: 5601
+    name: "kibana"
+    
+    # Public base URL for external access
+    publicBaseUrl: ""
+    
+    # Server settings
+    maxPayloadBytes: 1048576
+    keepaliveTimeout: 120000
+    socketTimeout: 120000
+    
+    # CORS settings
+    cors:
+      enabled: false
+      allowCredentials: false
+      allowOrigin: ["*"]
+  
+  # Logging configuration
+  logging:
+    root:
+      level: "info"
+    
+    appenders:
+      default:
+        type: "console"
+        layout:
+          type: "json"
+    
+    loggers:
+      - name: "plugins.security"
+        level: "debug"
+      - name: "elasticsearch"
+        level: "info"
+  
+  # Security configuration
+  security:
+    enabled: false
+    
+    # Encryption keys
+    encryptionKey: "a7a6311933d3503b89bc2dbc36572c33a6c10925682e591bffcab6911c06786d"
+    
+    # Session settings
+    session:
+      idleTimeout: "8h"
+      lifespan: "30d"
+    
+    # Authentication
+    auth:
+      providers: []
+  
+  # X-Pack features
+  xpack:
+    security:
+      enabled: false
+    
+    monitoring:
+      enabled: true
+      kibana:
+        collection:
+          enabled: true
+          interval: 10000
+    
+    reporting:
+      enabled: true
+      encryptionKey: "a_random_string_of_at_least_32_characters"
+    
+    graph:
+      enabled: true
+    
+    ml:
+      enabled: false
+  
+  # Index patterns and dashboards
+  kibana:
+    # Default index pattern
+    defaultAppId: "discover"
+    
+    # Index patterns to create on startup
+    indexPatterns:
+      - name: "kubespray-logs-*"
+        timeFieldName: "@timestamp"
+        title: "Kubespray Logs"
+      - name: "filebeat-*"
+        timeFieldName: "@timestamp"
+        title: "Filebeat Logs"
+    
+    # Saved objects to import
+    savedObjects:
+      dashboards: []
+      visualizations: []
+      searches: []
+  
+  # Performance and optimization
+  performance:
+    # Bundle optimization
+    bundleDir: "/usr/share/kibana/optimize"
+    
+    # Memory settings
+    nodeOptions: "--max-old-space-size=2048"
+    
+    # Cache settings
+    cache:
+      enabled: true
+      ttl: 300000
+  
+  # Service configuration
+  service:
+    type: LoadBalancer
+    port: 5601
+    targetPort: 5601
+    
+    # Service annotations
+    annotations: {}
+    
+    # LoadBalancer specific settings
+    loadBalancerIP: ""  # MetalLB will auto-assign from pool
+    
+    # NodePort configuration (if type is NodePort)
+    nodePort: 30601
+    
+    # Load balancer settings (if type is LoadBalancer)
+    loadBalancer:
+      sourceRanges: []
+  
+  # Ingress configuration
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: kibana.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  
+  # Resource allocation
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  
+  # Health checks
+  healthChecks:
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 120
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+      httpGet:
+        path: /api/status
+        port: 5601
+    
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+      httpGet:
+        path: /api/status
+        port: 5601
+  
+  # Service Account
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  
+  # Pod Security Context
+  podSecurityContext:
+    fsGroup: 1000
+    runAsUser: 1000
+    runAsNonRoot: true
+  
+  # Container Security Context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+  
+  # Configuration files
+  config:
+    # Main kibana.yml configuration
+    kibana.yml: |
+      server.host: "0.0.0.0"
+      server.port: 5601
+      elasticsearch.hosts: ["http://elk-stack-platform-elasticsearch:9200"]
+      server.publicBaseUrl: ""
+      xpack.security.enabled: false
+      xpack.security.authc.providers.anonymous.anonymous1.order: 0
+      xpack.security.authc.providers.anonymous.anonymous1.credentials.username: "anonymous_user"
+      xpack.security.authc.providers.anonymous.anonymous1.credentials.password: "anonymous_password"
+      xpack.encryptedSavedObjects.encryptionKey: "a7a6311933d3503b89bc2dbc36572c33a6c10925682e591bffcab6911c06786d"
+      elasticsearch.username: ""
+      elasticsearch.password: ""
+      elasticsearch.ssl.verificationMode: none
+      xpack.fleet.enabled: false
+      xpack.reporting.enabled: false
+      xpack.security.enrollment.enabled: false
+      xpack.interactiveSetup.enabled: false
+      server.securityResponseHeaders.disableEmbedding: false
+      csp.strict: false
+      status.allowAnonymous: true
+      server.uuid: "5b2de169-2785-441b-ae8c-186a1936b17d"
+      logging.appenders.console.type: console
+      logging.appenders.console.layout.type: json
+      logging.root.level: info
+      server.shutdownTimeout: 5s
+      monitoring.kibana.collection.enabled: true
+  
+  # Extra volumes and volume mounts
+  extraVolumes: []
+  extraVolumeMounts: []
+  
+  # Extra environment variables
+  extraEnvVars: []
+  
+  # Extra init containers
+  extraInitContainers: []
+  
+  # Pod annotations
+  podAnnotations: {}
+  
+  # Pod labels
+  podLabels: {}
+  
+  # Node selection and scheduling
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  
+  # Pod Disruption Budget
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  
+  # Deployment strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  
+  # Plugins configuration
+  plugins:
+    # List of plugins to install
+    install: []
+    
+    # Plugin installation settings
+    timeout: 300
+    
+    # Custom plugin configuration
+    config: {}
+  
+  # Environment-specific overrides
+  environments:
+    production:
+      replicaCount: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1000m"
+        limits:
+          memory: "4Gi"
+          cpu: "2000m"
+      performance:
+        nodeOptions: "--max-old-space-size=4096"
+      ingress:
+        enabled: true
+        hosts:
+          - host: kibana.production.com
+            paths:
+              - path: /
+                pathType: Prefix
+        tls:
+          - secretName: kibana-tls
+            hosts:
+              - kibana.production.com
+    
+    staging:
+      replicaCount: 1
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1000m"
+      ingress:
+        enabled: true
+        hosts:
+          - host: kibana.staging.com
+            paths:
+              - path: /
+                pathType: Prefix
+    
+    development:
+      replicaCount: 1
+      service:
+        type: NodePort
+        nodePort: 30601
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "200m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"

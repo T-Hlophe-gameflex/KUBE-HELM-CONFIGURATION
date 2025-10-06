@@ -1,0 +1,18 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-index-templates
+  namespace: monitoring
+  labels:
+    app: logstash
+    component: index-templates
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+data:
+  filebeat-template.json: |
+{{ .Files.Get "config/index-templates/filebeat-template.json" | indent 4 }}
+  logstash-template.json: |
+{{ .Files.Get "config/index-templates/logstash-template.json" | indent 4 }}
+  application-template.json: |
+{{ .Files.Get "config/index-templates/application-template.json" | indent 4 }}
+{{- end }}

@@ -1,0 +1,13 @@
+{{- if .Values.infrastructure.metallb.enabled }}
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: default-l2
+  namespace: metallb-system
+  labels:
+    app: metallb
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+spec:
+  ipAddressPools:
+  - default-pool
+{{- end }}

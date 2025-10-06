@@ -1,0 +1,17 @@
+apiVersion: v2
+name: logstash
+description: Logstash for log processing in ELK Stack
+type: application
+version: 1.0.0
+appVersion: "8.10.4"
+dependencies:
+  - name: elasticsearch
+    version: "1.0.0"
+    repository: "file://../elasticsearch"
+keywords:
+  - logstash
+  - logging
+  - processing
+  - elk
+maintainers:
+  - name: Platform Team

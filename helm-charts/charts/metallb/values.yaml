@@ -1,0 +1,280 @@
+# Infrastructure Values - Global and Namespace Configuration
+# This file contains the core infrastructure settings that apply across all components
+
+# Global configuration that affects all components
+global:
+  # Docker registry settings
+  imageRegistry: ""
+  imagePullSecrets: []
+  
+  # Storage configuration
+  storageClass: ""
+  defaultStorageSize: "10Gi"
+  
+  # Network configuration
+  clusterDomain: "cluster.local"
+  
+  # Security settings
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  
+  # Resource defaults
+  defaultResources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# Chart-specific overrides
+nameOverride: ""
+fullnameOverride: ""
+
+# Namespace configuration - Core infrastructure namespaces
+namespaces:
+  create: true
+  
+  monitoring:
+    name: monitoring
+    labels:
+      purpose: observability-logging
+      tier: platform
+      type: application
+    annotations:
+      description: "ELK Stack and monitoring infrastructure"
+  
+  backend:
+    name: backend
+    labels:
+      purpose: business-logic
+      tier: application
+      type: application
+    annotations:
+      description: "Business logic microservices"
+  
+  database:
+    name: database
+    labels:
+      purpose: data-storage
+      tier: data
+      type: application
+    annotations:
+      description: "Database and data persistence layer"
+  
+  system:
+    name: system
+    labels:
+      purpose: infrastructure
+      tier: platform
+      type: system
+    annotations:
+      description: "System infrastructure components"
+
+# Network Policies (optional)
+networkPolicies:
+  enabled: false
+  
+  # Default deny all ingress traffic
+  defaultDeny: true
+  
+  # Allow specific traffic between namespaces
+  allowRules:
+    - name: monitoring-to-all
+      fromNamespace: monitoring
+      toNamespaces: ["backend", "database", "system"]
+      ports: [9200, 5044, 8080, 8081, 5432]
+    
+    - name: backend-to-database
+      fromNamespace: backend
+      toNamespaces: ["database"]
+      ports: [5432]
+
+# Resource Quotas (optional)
+resourceQuotas:
+  enabled: false
+  
+  quotas:
+    monitoring:
+      requests.cpu: "4"
+      requests.memory: "8Gi"
+      limits.cpu: "8"
+      limits.memory: "16Gi"
+      persistentvolumeclaims: "5"
+    
+    backend:
+      requests.cpu: "2"
+      requests.memory: "4Gi"
+      limits.cpu: "4"
+      limits.memory: "8Gi"
+    
+    database:
+      requests.cpu: "2"
+      requests.memory: "4Gi"
+      limits.cpu: "4"
+      limits.memory: "8Gi"
+      persistentvolumeclaims: "3"
+
+# Pod Security Standards
+podSecurityStandards:
+  enabled: false
+  enforcement: "baseline"  # baseline, restricted, privileged
+  audit: "restricted"
+  warn: "restricted"
+
+# Service Mesh Integration (optional)
+serviceMesh:
+  enabled: false
+  type: "istio"  # istio, linkerd, consul-connect
+  
+  istio:
+    injection: true
+    sidecarResources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+# Ingress Configuration
+ingress:
+  enabled: false
+  className: "nginx"
+  
+  # Default annotations for all ingresses
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  
+  # TLS configuration
+  tls:
+    enabled: false
+    secretName: "elk-platform-tls"
+    hosts:
+      - "kibana.example.com"
+      - "grafana.example.com"
+
+# Monitoring and Observability (Prometheus/Grafana integration)
+monitoring:
+  prometheus:
+    enabled: false
+    namespace: monitoring
+    scrapeInterval: "30s"
+    evaluationInterval: "30s"
+  
+  grafana:
+    enabled: false
+    namespace: monitoring
+  
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    scrapeTimeout: "10s"
+    labels: {}
+
+# Backup and Recovery
+backup:
+  enabled: false
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: "30d"
+  
+  s3:
+    bucket: ""
+    region: ""
+    accessKey: ""
+    secretKey: ""
+
+# Multi-cluster support
+multiCluster:
+  enabled: false
+  clusterId: "default"
+  region: "us-west-2"
+  environment: "production"
+
+# Development settings
+development:
+  enabled: false
+  
+  # Skip resource limits in dev mode
+  skipResourceLimits: true
+  
+  # Enable debug logging
+  debugLogging: true
+  
+  # Use NodePort services for easy access
+  useNodePort: true
+
+# Node selection and scheduling
+scheduling:
+  # Node selector for all components
+  nodeSelector: {}
+  
+  # Tolerations for all components
+  tolerations: []
+  
+  # Affinity rules for all components
+  affinity: {}
+  
+  # Pod disruption budgets
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+# Environment-specific configurations
+environments:
+  production:
+    replicas:
+      elasticsearch: 3
+      kibana: 2
+      logstash: 2
+      orderService: 5
+      userService: 3
+      postgres: 1
+    
+    persistence:
+      enabled: true
+      storageClass: "fast-ssd"
+    
+    resources:
+      high: true
+  
+  staging:
+    replicas:
+      elasticsearch: 2
+      kibana: 1
+      logstash: 1
+      orderService: 2
+      userService: 2
+      postgres: 1
+    
+    persistence:
+      enabled: true
+      storageClass: "standard"
+  
+  development:
+    replicas:
+      elasticsearch: 1
+      kibana: 1
+      logstash: 1
+      orderService: 1
+      userService: 1
+      postgres: 1
+    
+    persistence:
+      enabled: false
+    
+    resources:
+      low: true
+
+# Infrastructure Components
+infrastructure:
+  # MetalLB LoadBalancer for bare-metal clusters
+  metallb:
+    enabled: true
+    version: "0.14.8"
+    # IP range for LoadBalancer services
+    # Should be within your Docker/Kind network range
+    ipRange: "172.18.255.200-172.18.255.250"

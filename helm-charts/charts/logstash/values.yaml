@@ -1,0 +1,403 @@
+# Logstash Configuration Values
+# This file contains all configuration specific to Logstash
+
+logstash:
+  # Enable/disable Logstash deployment
+  enabled: true
+  
+  # Number of Logstash replicas
+  replicaCount: 1
+  
+  # Image configuration
+  image:
+    repository: docker.elastic.co/logstash/logstash
+    tag: "8.10.4"
+    pullPolicy: IfNotPresent
+  
+  # JVM and memory settings
+  jvm:
+    heapSize: "256m"
+    opts: "-Xmx256m -Xms256m"
+    
+    # GC settings
+    gcSettings: |
+      -XX:+UseG1GC
+      -XX:MaxGCPauseMillis=250
+  
+  # Elasticsearch output configuration
+  elasticsearch:
+    hosts: ["elk-stack-platform-elasticsearch:9200"]
+    username: ""
+    password: ""
+    
+    # Index settings
+    index: "kubespray-logs-%{+YYYY.MM.dd}"
+    template:
+      name: "kubespray-logs"
+      pattern: "kubespray-logs-*"
+      settings:
+        number_of_shards: 1
+        number_of_replicas: 0
+  
+  # Input configuration
+  inputs:
+    beats:
+      enabled: true
+      port: 5044
+      host: "0.0.0.0"
+    
+    tcp:
+      enabled: false
+      port: 5000
+      codec: "json"
+    
+    udp:
+      enabled: false
+      port: 5000
+      codec: "json"
+    
+    http:
+      enabled: false
+      port: 8080
+      codec: "json"
+  
+  # Filter configuration
+  filters:
+    # Kubernetes metadata enrichment
+    kubernetes:
+      enabled: true
+      
+    # Grok patterns for log parsing
+    grok:
+      enabled: true
+      patterns:
+        - pattern: "%{COMBINEDAPACHELOG}"
+          field: "message"
+          target: "apache"
+        - pattern: "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}"
+          field: "message"
+          target: "application"
+    
+    # JSON parsing
+    json:
+      enabled: true
+      source: "message"
+      target: "parsed"
+    
+    # Mutate fields
+    mutate:
+      enabled: true
+      operations:
+        - remove_field: ["beat", "input", "host", "agent"]
+        - add_field:
+            processed_by: "logstash"
+            environment: "kubernetes"
+    
+    # Date parsing
+    date:
+      enabled: true
+      match: ["timestamp", "ISO8601"]
+      target: "@timestamp"
+  
+  # Output configuration
+  outputs:
+    elasticsearch:
+      enabled: true
+      codec: "json"
+      
+      # Document settings
+      document_type: "_doc"
+      document_id: "%{[@metadata][beat]}-%{[@metadata][type]}-%{+YYYY.MM.dd.HH.mm.ss}"
+      
+      # Template management
+      manage_template: true
+      template_overwrite: true
+    
+    # Debug output for development
+    stdout:
+      enabled: false
+      codec: "rubydebug"
+    
+    # File output for backup
+    file:
+      enabled: false
+      path: "/var/log/logstash/output"
+      codec: "json_lines"
+  
+  # Pipeline configuration
+  pipeline:
+    # Main pipeline configuration
+    main:
+      config: |
+        input {
+          beats {
+            port => 5044
+            host => "0.0.0.0"
+          }
+        }
+        
+        filter {
+          if [kubernetes] {
+            mutate {
+              add_field => { "cluster_name" => "kubespray-cluster" }
+              add_field => { "processed_by" => "logstash" }
+            }
+            
+            # Parse JSON messages
+            if [message] =~ /^\{.*\}$/ {
+              json {
+                source => "message"
+                target => "parsed_json"
+              }
+            }
+            
+            # Add service type based on namespace
+            if [kubernetes][namespace] == "monitoring" {
+              mutate { add_field => { "service_type" => "observability" } }
+            } else if [kubernetes][namespace] == "backend" {
+              mutate { add_field => { "service_type" => "business_logic" } }
+            } else if [kubernetes][namespace] == "database" {
+              mutate { add_field => { "service_type" => "data_layer" } }
+            } else {
+              mutate { add_field => { "service_type" => "system" } }
+            }
+            
+            # Clean up unwanted fields
+            mutate {
+              remove_field => ["beat", "input", "host", "agent"]
+            }
+          }
+        }
+        
+        output {
+          elasticsearch {
+            hosts => ["elk-stack-platform-elasticsearch:9200"]
+            index => "kubespray-logs-%{+YYYY.MM.dd}"
+            template_name => "kubespray-logs"
+            template_pattern => "kubespray-logs-*"
+            template_overwrite => true
+            manage_template => true
+          }
+        }
+    
+    # Additional pipelines
+    pipelines:
+      - pipeline.id: "beats"
+        path.config: "/usr/share/logstash/pipeline/beats.conf"
+        pipeline.workers: 2
+        pipeline.batch.size: 125
+        pipeline.batch.delay: 50
+  
+  # Configuration files
+  config:
+    # Main logstash.yml
+    logstash.yml: |
+      http.host: "0.0.0.0"
+      http.port: 9600
+      pipeline.workers: 2
+      pipeline.batch.size: 125
+      pipeline.batch.delay: 50
+      xpack.monitoring.enabled: true
+      xpack.monitoring.elasticsearch.hosts: ["http://elk-stack-platform-elasticsearch:9200"]
+      log.level: info
+      path.logs: /var/log/logstash
+    
+    # Pipeline configuration
+    pipeline.yml: |
+      - pipeline.id: beats
+        path.config: "/usr/share/logstash/pipeline/beats.conf"
+        pipeline.workers: 2
+        pipeline.batch.size: 125
+        pipeline.batch.delay: 50
+    
+    # JVM options
+    jvm.options: |
+      -Xms256m
+      -Xmx256m
+      -XX:+UseG1GC
+      -XX:MaxGCPauseMillis=250
+      -XX:+UseTLAB
+      -XX:+ResizeTLAB
+      -server
+      -Djava.awt.headless=true
+      -Dfile.encoding=UTF-8
+      -Djruby.compile.invokedynamic=true
+      -Djruby.jit.threshold=0
+      -Djruby.regexp.interruptible=true
+      -XX:+HeapDumpOnOutOfMemoryError
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    beatsPort: 5044
+    httpPort: 9600
+    
+    # Service annotations
+    annotations: {}
+  
+  # Resource allocation
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  
+  # Health checks
+  healthChecks:
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+      httpGet:
+        path: /
+        port: 9600
+    
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+      httpGet:
+        path: /
+        port: 9600
+  
+  # Service Account
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  
+  # Pod Security Context
+  podSecurityContext:
+    fsGroup: 1000
+    runAsUser: 1000
+    runAsNonRoot: true
+  
+  # Container Security Context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+  
+  # Persistence for logs and data
+  persistence:
+    enabled: false
+    storageClass: ""
+    size: 2Gi
+    accessModes:
+      - ReadWriteOnce
+    
+    # Additional volumes
+    logs:
+      enabled: true
+      size: 1Gi
+    data:
+      enabled: false
+      size: 2Gi
+  
+  # Extra volumes and volume mounts
+  extraVolumes: []
+  extraVolumeMounts: []
+  
+  # Extra environment variables
+  extraEnvVars: []
+  
+  # Extra init containers
+  extraInitContainers: []
+  
+  # Pod annotations
+  podAnnotations: {}
+  
+  # Pod labels
+  podLabels: {}
+  
+  # Node selection and scheduling
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  
+  # Pod Disruption Budget
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+  
+  # Deployment strategy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  
+  # Monitoring configuration
+  monitoring:
+    enabled: true
+    
+    # Metrics endpoint
+    metrics:
+      enabled: true
+      port: 9600
+      path: /_node/stats
+    
+    # ServiceMonitor for Prometheus
+    serviceMonitor:
+      enabled: false
+      namespace: monitoring
+      interval: 30s
+      labels: {}
+  
+  # Environment-specific overrides
+  environments:
+    production:
+      replicaCount: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1000m"
+        limits:
+          memory: "4Gi"
+          cpu: "2000m"
+      jvm:
+        heapSize: "2g"
+        opts: "-Xmx2g -Xms2g"
+      pipeline:
+        main:
+          workers: 4
+          batchSize: 250
+      persistence:
+        enabled: true
+        size: 10Gi
+    
+    staging:
+      replicaCount: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1000m"
+      jvm:
+        heapSize: "1g"
+        opts: "-Xmx1g -Xms1g"
+    
+    development:
+      replicaCount: 1
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "200m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+      outputs:
+        stdout:
+          enabled: true

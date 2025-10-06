@@ -1,0 +1,139 @@
+{{- if .Values.orderService.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "order-service.fullname" . }}-code
+  namespace: backend
+  labels:
+    {{- include "order-service.labels" . | nindent 4 }}
+data:
+  package.json: |
+    {
+      "name": "{{ .Values.orderService.application.name }}",
+      "version": "{{ .Chart.AppVersion }}",
+      "description": "Order Service for ELK Stack Platform",
+      "main": "server.js",
+      "scripts": {
+        "start": "node server.js"
+      },
+      "dependencies": {
+        "express": "^4.18.2",
+        "pg": "^8.11.0",
+        "pino": "^8.14.1",
+        "pino-pretty": "^10.0.0"
+      }
+    }
+  
+  server.js: |
+    const express = require('express');
+    const { Pool } = require('pg');
+    const pino = require('pino');
+    
+    const logger = pino({
+      level: process.env.LOG_LEVEL || 'info',
+      transport: {
+        target: 'pino-pretty'
+      }
+    });
+    
+    const app = express();
+    const port = process.env.PORT || {{ .Values.orderService.application.port }};
+    
+    // Database connection
+    const pool = new Pool({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD
+    });
+    
+    app.use(express.json());
+    
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      res.status(200).json({ status: 'healthy', service: '{{ .Values.orderService.application.name }}' });
+    });
+    
+    // Readiness check endpoint
+    app.get('/ready', async (req, res) => {
+      try {
+        await pool.query('SELECT 1');
+        res.status(200).json({ status: 'ready', service: '{{ .Values.orderService.application.name }}' });
+      } catch (error) {
+        logger.error({ error }, 'Database connection failed');
+        res.status(503).json({ status: 'not ready', error: error.message });
+      }
+    });
+    
+    // Create order endpoint
+    app.post('/orders', async (req, res) => {
+      const { customer_id, total_amount, items } = req.body;
+      
+      logger.info({
+        action: 'create_order',
+        customer_id,
+        total_amount,
+        items_count: items?.length
+      }, 'Creating new order');
+      
+      try {
+        const result = await pool.query(
+          'INSERT INTO orders (customer_id, total_amount, status) VALUES ($1, $2, $3) RETURNING *',
+          [customer_id, total_amount, 'pending']
+        );
+        
+        logger.info({ order_id: result.rows[0].id }, 'Order created successfully');
+        res.status(201).json(result.rows[0]);
+      } catch (error) {
+        logger.error({ error }, 'Failed to create order');
+        res.status(500).json({ error: 'Failed to create order' });
+      }
+    });
+    
+    // Get orders endpoint
+    app.get('/orders', async (req, res) => {
+      logger.info('Fetching all orders');
+      
+      try {
+        const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC LIMIT 100');
+        logger.info({ count: result.rows.length }, 'Orders fetched successfully');
+        res.json(result.rows);
+      } catch (error) {
+        logger.error({ error }, 'Failed to fetch orders');
+        res.status(500).json({ error: 'Failed to fetch orders' });
+      }
+    });
+    
+    // Get specific order
+    app.get('/orders/:id', async (req, res) => {
+      const { id } = req.params;
+      logger.info({ order_id: id }, 'Fetching order');
+      
+      try {
+        const result = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+          res.status(404).json({ error: 'Order not found' });
+        } else {
+          res.json(result.rows[0]);
+        }
+      } catch (error) {
+        logger.error({ error, order_id: id }, 'Failed to fetch order');
+        res.status(500).json({ error: 'Failed to fetch order' });
+      }
+    });
+    
+    // Metrics endpoint
+    app.get('/metrics', (req, res) => {
+      res.json({
+        service: '{{ .Values.orderService.application.name }}',
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    app.listen(port, () => {
+      logger.info({ port }, 'Order Service started');
+    });
+{{- end }}

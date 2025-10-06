@@ -1,0 +1,43 @@
+{{- if .Values.kibana.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-kibana
+  namespace: monitoring
+  labels:
+    app: kibana
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.kibana.replicaCount }}
+  selector:
+    matchLabels:
+      app: kibana
+      {{- include "elk-stack-platform.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: kibana
+        {{- include "elk-stack-platform.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: kibana
+        image: {{ .Values.kibana.image.repository }}:{{ .Values.kibana.image.tag }}
+        ports:
+        - containerPort: 5601
+          name: ui
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: {{ index .Values.kibana.elasticsearch.hosts 0 | quote }}
+        - name: SERVER_HOST
+          value: "0.0.0.0"
+        resources:
+          {{- toYaml .Values.kibana.resources | nindent 10 }}
+        volumeMounts:
+        - name: config
+          mountPath: /usr/share/kibana/config/kibana.yml
+          subPath: kibana.yml
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "elk-stack-platform.fullname" . }}-kibana-config
+{{- end }}

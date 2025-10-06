@@ -1,0 +1,63 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-logstash
+  namespace: monitoring
+  labels:
+    app: logstash
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.logstash.replicaCount }}
+  selector:
+    matchLabels:
+      app: logstash
+      {{- include "elk-stack-platform.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: logstash
+        {{- include "elk-stack-platform.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: logstash
+        image: {{ .Values.logstash.image.repository }}:{{ .Values.logstash.image.tag }}
+        ports:
+        - containerPort: 5044
+          name: beats
+        - containerPort: 9600
+          name: http
+        env:
+        - name: LS_JAVA_OPTS
+          value: {{ .Values.logstash.javaOpts }}
+        - name: ELASTICSEARCH_HOSTS
+          value: {{ .Values.logstash.elasticsearchHosts }}
+        resources:
+          {{- toYaml .Values.logstash.resources | nindent 10 }}
+        volumeMounts:
+        - name: pipeline-config
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          subPath: logstash.conf
+        - name: logstash-config
+          mountPath: /usr/share/logstash/config/logstash.yml
+          subPath: logstash.yml
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9600
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9600
+          initialDelaySeconds: 90
+          periodSeconds: 30
+      volumes:
+      - name: pipeline-config
+        configMap:
+          name: {{ include "elk-stack-platform.fullname" . }}-logstash-pipeline
+      - name: logstash-config
+        configMap:
+          name: {{ include "elk-stack-platform.fullname" . }}-logstash-config
+{{- end }}

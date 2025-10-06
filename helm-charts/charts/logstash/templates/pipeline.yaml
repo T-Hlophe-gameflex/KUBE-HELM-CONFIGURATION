@@ -1,0 +1,63 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-logstash-pipeline
+  namespace: monitoring
+  labels:
+    app: logstash
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+data:
+  logstash.conf: |
+    input {
+      beats {
+        port => 5044
+      }
+    }
+
+    filter {
+      # Parse JSON logs
+      if [fields][logtype] == "json" {
+        json {
+          source => "message"
+        }
+      }
+
+      # Add Kubernetes metadata
+      if [kubernetes] {
+        mutate {
+          add_field => { "k8s_namespace" => "%{[kubernetes][namespace]}" }
+          add_field => { "k8s_pod" => "%{[kubernetes][pod][name]}" }
+          add_field => { "k8s_container" => "%{[kubernetes][container][name]}" }
+        }
+      }
+
+      # Classify logs by service
+      if [k8s_container] =~ "elasticsearch" {
+        mutate { add_field => { "service" => "elasticsearch" } }
+      } else if [k8s_container] =~ "kibana" {
+        mutate { add_field => { "service" => "kibana" } }
+      } else if [k8s_container] =~ "logstash" {
+        mutate { add_field => { "service" => "logstash" } }
+      } else {
+        mutate { add_field => { "service" => "unknown" } }
+      }
+
+      # Add timestamp
+      date {
+        match => [ "timestamp", "ISO8601" ]
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => {{ .Values.logstash.elasticsearch.hosts | toJson }}
+        index => "logs-%{+YYYY.MM.dd}"
+      }
+      
+      # Debug output (remove in production)
+      stdout { 
+        codec => rubydebug 
+      }
+    }
+{{- end }}

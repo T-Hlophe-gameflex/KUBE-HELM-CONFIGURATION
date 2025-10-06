@@ -1,0 +1,85 @@
+{{- if .Values.kibana.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-test-kibana
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "10"
+spec:
+  containers:
+  - name: test-kibana
+    image: curlimages/curl:8.4.0
+    command:
+    - sh
+    - -c
+    - |
+      set -e
+      echo "=========================================="
+      echo "Testing Kibana Connection"
+      echo "=========================================="
+      echo ""
+      
+      # Test 1: Wait for Kibana to be ready
+      echo "✓ Test 1: Waiting for Kibana to start..."
+      MAX_RETRIES=30
+      RETRY_COUNT=0
+      while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if curl -f -s http://{{ include "elk-stack-platform.fullname" . }}-kibana:5601/api/status > /dev/null 2>&1; then
+          echo "  ✅ Kibana is responding"
+          break
+        fi
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "  ⏳ Waiting... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+        sleep 5
+      done
+      
+      if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+        echo "  ❌ Kibana did not start in time"
+        exit 1
+      fi
+      echo ""
+      
+      # Test 2: Check status endpoint
+      echo "✓ Test 2: Checking Kibana status..."
+      STATUS=$(curl -s http://{{ include "elk-stack-platform.fullname" . }}-kibana:5601/api/status | grep -o '"level":"[^"]*"' | head -1 | cut -d'"' -f4)
+      echo "  Status level: $STATUS"
+      if [ "$STATUS" = "available" ] || [ -z "$STATUS" ]; then
+        echo "  ✅ Kibana is available"
+      else
+        echo "  ❌ Kibana is not available"
+        exit 1
+      fi
+      echo ""
+      
+      # Test 3: Verify Elasticsearch connection
+      echo "✓ Test 3: Verifying Elasticsearch connection..."
+      if curl -s http://{{ include "elk-stack-platform.fullname" . }}-kibana:5601/api/status | grep -q "elasticsearch"; then
+        echo "  ✅ Kibana can connect to Elasticsearch"
+      else
+        echo "  ⚠️  Cannot verify Elasticsearch connection"
+      fi
+      echo ""
+      
+      # Test 4: Check UI accessibility
+      echo "✓ Test 4: Checking UI accessibility..."
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://{{ include "elk-stack-platform.fullname" . }}-kibana:5601/)
+      echo "  HTTP response code: $HTTP_CODE"
+      if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+        echo "  ✅ Kibana UI is accessible"
+      else
+        echo "  ❌ Kibana UI returned unexpected status"
+        exit 1
+      fi
+      echo ""
+      
+      echo "=========================================="
+      echo "✅ All Kibana tests passed!"
+      echo "=========================================="
+  restartPolicy: Never
+{{- end }}

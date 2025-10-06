@@ -1,0 +1,16 @@
+apiVersion: v2
+name: metallb
+description: MetalLB LoadBalancer configuration for bare-metal/local clusters
+type: application
+version: 1.0.0
+appVersion: "0.14.8"
+keywords:
+  - metallb
+  - loadbalancer
+  - networking
+  - infrastructure
+maintainers:
+  - name: Platform Team
+home: https://metallb.universe.tf/
+sources:
+  - https://github.com/metallb/metallb

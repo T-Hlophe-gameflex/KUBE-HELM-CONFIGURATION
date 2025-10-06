@@ -1,0 +1,35 @@
+---
+# Main Orchestration Playbook
+# This playbook orchestrates the complete ELK Stack Platform deployment
+# using Helm charts and Kubernetes
+
+- name: ELK Stack Platform Management
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: false
+  
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    kubeconfig: "~/.kube/config"
+    helm_charts_dir: "{{ playbook_dir }}/../helm-charts"
+    namespace: monitoring
+    release_name: elk-stack-platform
+    action: "{{ action | default('deploy') }}"
+    
+  tasks:
+    - name: Display action
+      debug:
+        msg: "Executing action: {{ action }}"
+
+    - name: Include deployment tasks
+      include_tasks: tasks/deploy-helm.yml
+      when: action == 'deploy'
+
+    - name: Include removal tasks
+      include_tasks: tasks/remove-helm.yml
+      when: action == 'remove'
+
+    - name: Include validation tasks
+      include_tasks: tasks/validate-cluster.yml
+      when: action == 'validate'

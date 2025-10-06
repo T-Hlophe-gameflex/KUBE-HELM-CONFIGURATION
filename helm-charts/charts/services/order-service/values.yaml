@@ -1,0 +1,77 @@
+orderService:
+  enabled: true
+  replicaCount: 2
+  
+  image:
+    repository: node
+    tag: "18-alpine"
+    pullPolicy: IfNotPresent
+  
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  
+  # Application configuration
+  application:
+    name: "order-service"
+    port: 8080
+    metricsPort: 9090
+    
+    # Database connection
+    database:
+      host: "postgres"
+      port: 5432
+      name: "platform_db"
+      user: "platform_user"
+      password: "platform_password"
+    
+    # Logging configuration
+    logging:
+      level: "info"
+      format: "json"
+    
+    # Environment variables
+    environment:
+      NODE_ENV: "production"
+      LOG_LEVEL: "info"
+      SERVICE_NAME: "order-service"
+      SERVICE_GROUP: "business-services"
+      NAMESPACE: "backend"
+  
+  # Resource limits
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  
+  # Health checks
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  
+  # Auto-scaling
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+
+# PostgreSQL dependency configuration
+postgres:
+  enabled: false  # Set to true if you want to deploy postgres with this chart

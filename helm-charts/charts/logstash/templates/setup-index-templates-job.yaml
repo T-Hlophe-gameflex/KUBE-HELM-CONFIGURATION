@@ -1,0 +1,101 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-setup-index-templates
+  namespace: monitoring
+  labels:
+    app: logstash
+    component: setup
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: logstash
+        component: setup
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: setup-templates
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "=========================================="
+          echo "Setting up Elasticsearch Index Templates"
+          echo "=========================================="
+          
+          ES_URL="http://{{ include "elk-stack-platform.fullname" . }}-elasticsearch:9200"
+          
+          # Wait for Elasticsearch to be ready
+          echo "Waiting for Elasticsearch to be available..."
+          until curl -s "$ES_URL/_cluster/health" > /dev/null; do
+            echo "Waiting for Elasticsearch..."
+            sleep 5
+          done
+          echo "✓ Elasticsearch is available"
+          echo ""
+          
+          # Apply Filebeat template
+          echo "1. Applying Filebeat index template..."
+          if curl -s -X PUT "$ES_URL/_index_template/filebeat-logs" \
+            -H 'Content-Type: application/json' \
+            -d @/templates/filebeat-template.json | grep -q '"acknowledged":true'; then
+            echo "✓ Filebeat template applied successfully"
+          else
+            echo "✗ Failed to apply Filebeat template"
+            exit 1
+          fi
+          echo ""
+          
+          # Apply Logstash template
+          echo "2. Applying Logstash index template..."
+          if curl -s -X PUT "$ES_URL/_index_template/logstash-logs" \
+            -H 'Content-Type: application/json' \
+            -d @/templates/logstash-template.json | grep -q '"acknowledged":true'; then
+            echo "✓ Logstash template applied successfully"
+          else
+            echo "✗ Failed to apply Logstash template"
+            exit 1
+          fi
+          echo ""
+          
+          # Apply Application template
+          echo "3. Applying Application logs index template..."
+          if curl -s -X PUT "$ES_URL/_index_template/application-logs" \
+            -H 'Content-Type: application/json' \
+            -d @/templates/application-template.json | grep -q '"acknowledged":true'; then
+            echo "✓ Application template applied successfully"
+          else
+            echo "✗ Failed to apply Application template"
+            exit 1
+          fi
+          echo ""
+          
+          # Verify templates
+          echo "=========================================="
+          echo "Verifying installed templates..."
+          echo "=========================================="
+          curl -s "$ES_URL/_cat/templates?v&s=name&h=name,index_patterns" | grep -E "filebeat|logstash|application"
+          
+          echo ""
+          echo "=========================================="
+          echo "Index template setup complete!"
+          echo "=========================================="
+        volumeMounts:
+        - name: templates
+          mountPath: /templates
+          readOnly: true
+      volumes:
+      - name: templates
+        configMap:
+          name: {{ include "elk-stack-platform.fullname" . }}-index-templates
+{{- end }}

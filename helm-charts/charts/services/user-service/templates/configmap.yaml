@@ -1,0 +1,166 @@
+{{- if .Values.userService.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "user-service.fullname" . }}-code
+  namespace: backend
+  labels:
+    {{- include "user-service.labels" . | nindent 4 }}
+data:
+  package.json: |
+    {
+      "name": "{{ .Values.userService.application.name }}",
+      "version": "{{ .Chart.AppVersion }}",
+      "description": "User Service for ELK Stack Platform",
+      "main": "server.js",
+      "scripts": {
+        "start": "node server.js"
+      },
+      "dependencies": {
+        "express": "^4.18.2",
+        "pg": "^8.11.0",
+        "pino": "^8.14.1",
+        "pino-pretty": "^10.0.0",
+        "bcrypt": "^5.1.0"
+      }
+    }
+  
+  server.js: |
+    const express = require('express');
+    const { Pool } = require('pg');
+    const bcrypt = require('bcrypt');
+    const pino = require('pino');
+    
+    const logger = pino({
+      level: process.env.LOG_LEVEL || 'info',
+      transport: {
+        target: 'pino-pretty'
+      }
+    });
+    
+    const app = express();
+    const port = process.env.PORT || {{ .Values.userService.application.port }};
+    
+    // Database connection
+    const pool = new Pool({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD
+    });
+    
+    app.use(express.json());
+    
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      res.status(200).json({ status: 'healthy', service: '{{ .Values.userService.application.name }}' });
+    });
+    
+    // Readiness check endpoint
+    app.get('/ready', async (req, res) => {
+      try {
+        await pool.query('SELECT 1');
+        res.status(200).json({ status: 'ready', service: '{{ .Values.userService.application.name }}' });
+      } catch (error) {
+        logger.error({ error }, 'Database connection failed');
+        res.status(503).json({ status: 'not ready', error: error.message });
+      }
+    });
+    
+    // Create user endpoint
+    app.post('/users', async (req, res) => {
+      const { username, email, password } = req.body;
+      
+      logger.info({
+        action: 'create_user',
+        username,
+        email
+      }, 'Creating new user');
+      
+      try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const result = await pool.query(
+          'INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at',
+          [username, email, hashedPassword]
+        );
+        
+        logger.info({ user_id: result.rows[0].id }, 'User created successfully');
+        res.status(201).json(result.rows[0]);
+      } catch (error) {
+        logger.error({ error }, 'Failed to create user');
+        res.status(500).json({ error: 'Failed to create user' });
+      }
+    });
+    
+    // Get users endpoint
+    app.get('/users', async (req, res) => {
+      logger.info('Fetching all users');
+      
+      try {
+        const result = await pool.query('SELECT id, username, email, created_at FROM users ORDER BY created_at DESC LIMIT 100');
+        logger.info({ count: result.rows.length }, 'Users fetched successfully');
+        res.json(result.rows);
+      } catch (error) {
+        logger.error({ error }, 'Failed to fetch users');
+        res.status(500).json({ error: 'Failed to fetch users' });
+      }
+    });
+    
+    // Get specific user
+    app.get('/users/:id', async (req, res) => {
+      const { id } = req.params;
+      logger.info({ user_id: id }, 'Fetching user');
+      
+      try {
+        const result = await pool.query('SELECT id, username, email, created_at FROM users WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+          res.status(404).json({ error: 'User not found' });
+        } else {
+          res.json(result.rows[0]);
+        }
+      } catch (error) {
+        logger.error({ error, user_id: id }, 'Failed to fetch user');
+        res.status(500).json({ error: 'Failed to fetch user' });
+      }
+    });
+    
+    // Update user endpoint
+    app.put('/users/:id', async (req, res) => {
+      const { id } = req.params;
+      const { username, email } = req.body;
+      
+      logger.info({ user_id: id, username, email }, 'Updating user');
+      
+      try {
+        const result = await pool.query(
+          'UPDATE users SET username = $1, email = $2 WHERE id = $3 RETURNING id, username, email, created_at',
+          [username, email, id]
+        );
+        
+        if (result.rows.length === 0) {
+          res.status(404).json({ error: 'User not found' });
+        } else {
+          logger.info({ user_id: id }, 'User updated successfully');
+          res.json(result.rows[0]);
+        }
+      } catch (error) {
+        logger.error({ error, user_id: id }, 'Failed to update user');
+        res.status(500).json({ error: 'Failed to update user' });
+      }
+    });
+    
+    // Metrics endpoint
+    app.get('/metrics', (req, res) => {
+      res.json({
+        service: '{{ .Values.userService.application.name }}',
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    app.listen(port, () => {
+      logger.info({ port }, 'User Service started');
+    });
+{{- end }}

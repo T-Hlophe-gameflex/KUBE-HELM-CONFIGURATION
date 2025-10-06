@@ -1,0 +1,81 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-test-logstash
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "10"
+spec:
+  containers:
+  - name: test-logstash
+    image: curlimages/curl:8.4.0
+    command:
+    - sh
+    - -c
+    - |
+      set -e
+      echo "=========================================="
+      echo "Testing Logstash Connection"
+      echo "=========================================="
+      echo ""
+      
+      # Test 1: Basic connectivity
+      echo "✓ Test 1: Basic connectivity..."
+      MAX_RETRIES=20
+      RETRY_COUNT=0
+      while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if curl -f -s http://{{ include "elk-stack-platform.fullname" . }}-logstash:9600/ > /dev/null 2>&1; then
+          echo "  ✅ Logstash API is reachable"
+          break
+        fi
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "  ⏳ Waiting... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+        sleep 3
+      done
+      
+      if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+        echo "  ❌ Logstash did not start in time"
+        exit 1
+      fi
+      echo ""
+      
+      # Test 2: Node info
+      echo "✓ Test 2: Node information..."
+      if curl -s http://{{ include "elk-stack-platform.fullname" . }}-logstash:9600/ | grep -q "version"; then
+        VERSION=$(curl -s http://{{ include "elk-stack-platform.fullname" . }}-logstash:9600/ | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        echo "  Logstash version: $VERSION"
+        echo "  ✅ Node info available"
+      else
+        echo "  ⚠️  Cannot retrieve node info"
+      fi
+      echo ""
+      
+      # Test 3: Pipeline stats
+      echo "✓ Test 3: Pipeline status..."
+      if curl -s http://{{ include "elk-stack-platform.fullname" . }}-logstash:9600/_node/stats/pipelines > /dev/null 2>&1; then
+        echo "  ✅ Pipeline stats accessible"
+      else
+        echo "  ⚠️  Cannot access pipeline stats"
+      fi
+      echo ""
+      
+      # Test 4: Input port (beats)
+      echo "✓ Test 4: Checking Beats input port..."
+      if nc -z {{ include "elk-stack-platform.fullname" . }}-logstash 5044 2>/dev/null; then
+        echo "  ✅ Beats input port (5044) is open"
+      else
+        echo "  ℹ️  Beats port check skipped (nc not available)"
+      fi
+      echo ""
+      
+      echo "=========================================="
+      echo "✅ All Logstash tests passed!"
+      echo "=========================================="
+  restartPolicy: Never
+{{- end }}

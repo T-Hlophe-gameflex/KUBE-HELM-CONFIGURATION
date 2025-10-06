@@ -1,0 +1,30 @@
+postgres:
+  enabled: true
+  replicaCount: 1
+  
+  image:
+    repository: postgres
+    tag: "15-alpine"
+    pullPolicy: IfNotPresent
+  
+  service:
+    type: ClusterIP
+    port: 5432
+  
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 10Gi
+  
+  database:
+    name: platform_db
+    user: platform_user
+    password: platform_password
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

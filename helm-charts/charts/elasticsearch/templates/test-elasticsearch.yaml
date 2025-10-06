@@ -1,0 +1,87 @@
+{{- if .Values.elasticsearch.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-test-elasticsearch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  containers:
+  - name: test-elasticsearch
+    image: curlimages/curl:8.4.0
+    command:
+    - sh
+    - -c
+    - |
+      set -e
+      echo "=========================================="
+      echo "Testing Elasticsearch Connection"
+      echo "=========================================="
+      echo ""
+      
+      # Test 1: Basic connectivity
+      echo "✓ Test 1: Basic connectivity..."
+      if curl -f -s http://{{ include "elk-stack-platform.fullname" . }}-elasticsearch:9200/ > /dev/null; then
+        echo "  ✅ Elasticsearch is reachable"
+      else
+        echo "  ❌ Cannot reach Elasticsearch"
+        exit 1
+      fi
+      echo ""
+      
+      # Test 2: Cluster health
+      echo "✓ Test 2: Cluster health..."
+      HEALTH=$(curl -s http://{{ include "elk-stack-platform.fullname" . }}-elasticsearch:9200/_cluster/health | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+      echo "  Status: $HEALTH"
+      if [ "$HEALTH" = "green" ] || [ "$HEALTH" = "yellow" ]; then
+        echo "  ✅ Cluster is healthy"
+      else
+        echo "  ❌ Cluster is unhealthy"
+        exit 1
+      fi
+      echo ""
+      
+      # Test 3: Node info
+      echo "✓ Test 3: Node information..."
+      NODE_COUNT=$(curl -s http://{{ include "elk-stack-platform.fullname" . }}-elasticsearch:9200/_cat/nodes?h=name | wc -l)
+      echo "  Active nodes: $NODE_COUNT"
+      if [ "$NODE_COUNT" -gt 0 ]; then
+        echo "  ✅ Nodes are running"
+      else
+        echo "  ❌ No active nodes"
+        exit 1
+      fi
+      echo ""
+      
+      # Test 4: Index templates
+      echo "✓ Test 4: Index templates..."
+      TEMPLATE_COUNT=$(curl -s http://{{ include "elk-stack-platform.fullname" . }}-elasticsearch:9200/_index_template | grep -o '"name"' | wc -l)
+      echo "  Templates found: $TEMPLATE_COUNT"
+      if [ "$TEMPLATE_COUNT" -gt 0 ]; then
+        echo "  ✅ Index templates are configured"
+      else
+        echo "  ⚠️  No index templates (might be normal for fresh install)"
+      fi
+      echo ""
+      
+      # Test 5: Indices
+      echo "✓ Test 5: Indices..."
+      INDEX_COUNT=$(curl -s http://{{ include "elk-stack-platform.fullname" . }}-elasticsearch:9200/_cat/indices?h=index | grep -v '^\.' | wc -l)
+      echo "  Active indices: $INDEX_COUNT"
+      if [ "$INDEX_COUNT" -gt 0 ]; then
+        echo "  ✅ Indices exist"
+      else
+        echo "  ℹ️  No indices yet (normal for new deployment)"
+      fi
+      echo ""
+      
+      echo "=========================================="
+      echo "✅ All Elasticsearch tests passed!"
+      echo "=========================================="
+  restartPolicy: Never
+{{- end }}

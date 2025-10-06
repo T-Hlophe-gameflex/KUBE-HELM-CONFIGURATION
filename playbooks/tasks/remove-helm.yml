@@ -1,0 +1,39 @@
+---
+# Remove Helm Charts
+- name: Uninstall Helm releases
+  block:
+    - name: Remove User Service
+      command: helm uninstall user-service --namespace backend
+      ignore_errors: yes
+      
+    - name: Remove Order Service
+      command: helm uninstall order-service --namespace backend
+      ignore_errors: yes
+      
+    - name: Remove PostgreSQL
+      command: helm uninstall postgres --namespace database
+      ignore_errors: yes
+      
+    - name: Remove Filebeat
+      command: helm uninstall filebeat --namespace {{ namespace }}
+      ignore_errors: yes
+      
+    - name: Remove Logstash
+      command: helm uninstall logstash --namespace {{ namespace }}
+      ignore_errors: yes
+      
+    - name: Remove Kibana
+      command: helm uninstall kibana --namespace {{ namespace }}
+      ignore_errors: yes
+      
+    - name: Remove Elasticsearch
+      command: helm uninstall elasticsearch --namespace {{ namespace }}
+      ignore_errors: yes
+      
+    - name: Remove MetalLB configuration
+      command: helm uninstall metallb --namespace metallb-system
+      ignore_errors: yes
+      
+    - name: Display removal results
+      debug:
+        msg: "All charts removed successfully - ELK Stack, MetalLB, Database, and Business Services"

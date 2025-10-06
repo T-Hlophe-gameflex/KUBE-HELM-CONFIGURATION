@@ -1,0 +1,93 @@
+---
+# Deploy Helm Charts
+- name: Check if Kind cluster exists
+  command: kind get clusters
+  register: kind_clusters
+  failed_when: false
+  changed_when: false
+
+- name: Deploy individual Helm charts
+  block:
+    - name: Deploy Elasticsearch chart
+      command: >
+        helm upgrade --install elasticsearch
+        {{ helm_charts_dir }}/charts/elasticsearch
+        --namespace {{ namespace }}
+        --create-namespace
+        --values {{ helm_charts_dir }}/charts/elasticsearch/values.yaml
+        --wait --timeout 10m
+      register: elasticsearch_deploy
+      
+    - name: Deploy Kibana chart
+      command: >
+        helm upgrade --install kibana
+        {{ helm_charts_dir }}/charts/kibana
+        --namespace {{ namespace }}
+        --values {{ helm_charts_dir }}/charts/kibana/values.yaml
+        --wait --timeout 5m
+      register: kibana_deploy
+      
+    - name: Deploy Logstash chart
+      command: >
+        helm upgrade --install logstash
+        {{ helm_charts_dir }}/charts/logstash
+        --namespace {{ namespace }}
+        --values {{ helm_charts_dir }}/charts/logstash/values.yaml
+        --wait --timeout 5m
+      register: logstash_deploy
+      
+    - name: Deploy Filebeat chart
+      command: >
+        helm upgrade --install filebeat
+        {{ helm_charts_dir }}/charts/filebeat
+        --namespace {{ namespace }}
+        --values {{ helm_charts_dir }}/charts/filebeat/values.yaml
+        --wait --timeout 5m
+      register: filebeat_deploy
+      
+    - name: Deploy MetalLB configuration
+      command: >
+        helm upgrade --install metallb
+        {{ helm_charts_dir }}/charts/metallb
+        --namespace metallb-system
+        --create-namespace
+        --values {{ helm_charts_dir }}/charts/metallb/values.yaml
+        --wait
+      register: metallb_deploy
+      when: deploy_metallb | default(true)
+      
+    - name: Deploy PostgreSQL database
+      command: >
+        helm upgrade --install postgres
+        {{ helm_charts_dir }}/charts/services/postgres
+        --namespace database
+        --create-namespace
+        --values {{ helm_charts_dir }}/charts/services/postgres/values.yaml
+        --wait --timeout 5m
+      register: postgres_deploy
+      when: deploy_postgres | default(true)
+      
+    - name: Deploy Order Service
+      command: >
+        helm upgrade --install order-service
+        {{ helm_charts_dir }}/charts/services/order-service
+        --namespace backend
+        --create-namespace
+        --values {{ helm_charts_dir }}/charts/services/order-service/values.yaml
+        --wait --timeout 5m
+      register: order_service_deploy
+      when: deploy_order_service | default(true)
+      
+    - name: Deploy User Service
+      command: >
+        helm upgrade --install user-service
+        {{ helm_charts_dir }}/charts/services/user-service
+        --namespace backend
+        --values {{ helm_charts_dir }}/charts/services/user-service/values.yaml
+        --wait --timeout 5m
+      register: user_service_deploy
+      when: deploy_user_service | default(true)
+
+    - name: Display deployment results
+      debug:
+        msg: "All charts deployed successfully - ELK Stack, MetalLB, Database, and Business Services"

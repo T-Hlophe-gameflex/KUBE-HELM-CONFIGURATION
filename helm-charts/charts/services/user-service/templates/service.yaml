@@ -1,0 +1,22 @@
+{{- if .Values.userService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "user-service.fullname" . }}
+  namespace: backend
+  labels:
+    {{- include "user-service.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.userService.service.type }}
+  ports:
+  - port: {{ .Values.userService.service.port }}
+    targetPort: http
+    protocol: TCP
+    name: http
+  - port: {{ .Values.userService.application.metricsPort }}
+    targetPort: metrics
+    protocol: TCP
+    name: metrics
+  selector:
+    {{- include "user-service.selectorLabels" . | nindent 4 }}
+{{- end }}

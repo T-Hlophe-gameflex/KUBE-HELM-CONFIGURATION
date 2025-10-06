@@ -1,0 +1,13 @@
+apiVersion: v2
+name: postgres
+description: PostgreSQL database for ELK Stack Platform
+type: application
+version: 1.0.0
+appVersion: "15-alpine"
+keywords:
+  - postgres
+  - postgresql
+  - database
+  - sql
+maintainers:
+  - name: Platform Team

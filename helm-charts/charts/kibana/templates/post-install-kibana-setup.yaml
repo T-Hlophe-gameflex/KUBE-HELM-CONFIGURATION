@@ -1,0 +1,115 @@
+{{- if .Values.kibana.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-setup-kibana
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setup
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "elk-stack-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: setup
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: setup-kibana
+        image: curlimages/curl:8.4.0
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          
+          KIBANA_URL="http://{{ include "elk-stack-platform.fullname" . }}-kibana:5601"
+          KIBANA_API="$KIBANA_URL/api"
+          
+          echo "=========================================="
+          echo "Setting up Kibana Data Views"
+          echo "=========================================="
+          echo ""
+          
+          # Wait for Kibana to be ready
+          echo "1. Waiting for Kibana to be ready..."
+          MAX_RETRIES=60
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if curl -f -s "$KIBANA_API/status" > /dev/null 2>&1; then
+                  echo "   ✅ Kibana is ready"
+                  break
+              fi
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "   ⏳ Waiting... ($RETRY_COUNT/$MAX_RETRIES)"
+              sleep 5
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "   ❌ Kibana did not become ready in time"
+              exit 1
+          fi
+          echo ""
+          
+          # Additional wait for Kibana to fully initialize
+          echo "2. Waiting for Kibana to fully initialize..."
+          sleep 10
+          echo ""
+          
+          # Create Data Views
+          echo "3. Creating Data Views..."
+          echo ""
+          
+          # Function to create data view
+          create_data_view() {
+              local title="$1"
+              local name="$2"
+              local icon="$3"
+              
+              echo "   $icon Creating: $name"
+              RESPONSE=$(curl -s -X POST "$KIBANA_API/data_views/data_view" \
+                  -H 'kbn-xsrf: true' \
+                  -H 'Content-Type: application/json' \
+                  -d "{
+                      \"data_view\": {
+                          \"title\": \"$title\",
+                          \"name\": \"$name\",
+                          \"timeFieldName\": \"@timestamp\"
+                      }
+                  }")
+              
+              if echo "$RESPONSE" | grep -q '"data_view"'; then
+                  echo "      ✅ Created successfully"
+              elif echo "$RESPONSE" | grep -q "Duplicate"; then
+                  echo "      ℹ️  Already exists (skipped)"
+              else
+                  echo "      ⚠️  Response: $RESPONSE"
+              fi
+          }
+          
+          # Create all data views
+          create_data_view "system-logs-*" "System Logs" "🖥️"
+          create_data_view "filebeat-*" "Filebeat" "📋"
+          create_data_view "logstash-*" "Logstash" "⚙️"
+          
+          echo ""
+          echo "=========================================="
+          echo "✅ Kibana Setup Complete!"
+          echo "=========================================="
+          echo ""
+          echo "📊 Available Data Views:"
+          echo "   1. System Logs (system-logs-*)"
+          echo "   2. Filebeat (filebeat-*)"
+          echo "   3. Logstash (logstash-*)"
+          echo ""
+          echo "🌐 Access Kibana:"
+          echo "   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "elk-stack-platform.fullname" . }}-kibana 5601:5601"
+          echo "   Then open: http://localhost:5601"
+          echo ""
+{{- end }}

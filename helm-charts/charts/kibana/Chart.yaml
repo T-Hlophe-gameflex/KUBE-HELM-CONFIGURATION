@@ -1,0 +1,17 @@
+apiVersion: v2
+name: kibana
+description: Kibana Dashboard for ELK Stack Platform
+type: application
+version: 1.0.0
+appVersion: "8.10.4"
+dependencies:
+  - name: elasticsearch
+    version: "1.0.0"
+    repository: "file://../elasticsearch"
+keywords:
+  - kibana
+  - dashboard
+  - visualization
+  - elk
+maintainers:
+  - name: Platform Team

@@ -1,0 +1,19 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "postgres.fullname" . }}
+  namespace: database
+  labels:
+    app: postgres
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.postgres.service.type }}
+  ports:
+  - port: {{ .Values.postgres.service.port }}
+    targetPort: postgres
+    protocol: TCP
+    name: postgres
+  selector:
+    app: postgres
+{{- end }}

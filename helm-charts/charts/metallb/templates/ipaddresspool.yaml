@@ -1,0 +1,13 @@
+{{- if .Values.infrastructure.metallb.enabled }}
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default-pool
+  namespace: metallb-system
+  labels:
+    app: metallb
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+spec:
+  addresses:
+  - {{ .Values.infrastructure.metallb.ipRange }}
+{{- end }}

@@ -1,0 +1,88 @@
+{{- if .Values.userService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "user-service.fullname" . }}
+  namespace: backend
+  labels:
+    {{- include "user-service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.userService.autoscaling.enabled }}
+  replicas: {{ .Values.userService.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "user-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "user-service.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: user-service
+        image: "{{ .Values.userService.image.repository }}:{{ .Values.userService.image.tag }}"
+        imagePullPolicy: {{ .Values.userService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.userService.application.port }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ .Values.userService.application.metricsPort }}
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: {{ .Values.userService.application.environment.NODE_ENV }}
+        - name: LOG_LEVEL
+          value: {{ .Values.userService.application.logging.level }}
+        - name: SERVICE_NAME
+          value: {{ .Values.userService.application.environment.SERVICE_NAME }}
+        - name: SERVICE_GROUP
+          value: {{ .Values.userService.application.environment.SERVICE_GROUP }}
+        - name: NAMESPACE
+          value: {{ .Values.userService.application.environment.NAMESPACE }}
+        - name: DB_HOST
+          value: {{ .Values.userService.application.database.host }}
+        - name: DB_PORT
+          value: {{ .Values.userService.application.database.port | quote }}
+        - name: DB_NAME
+          value: {{ .Values.userService.application.database.name }}
+        - name: DB_USER
+          value: {{ .Values.userService.application.database.user }}
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "user-service.fullname" . }}-secret
+              key: db-password
+        {{- if .Values.userService.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.userService.livenessProbe.httpGet.path }}
+            port: {{ .Values.userService.livenessProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.userService.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.userService.livenessProbe.periodSeconds }}
+        {{- end }}
+        {{- if .Values.userService.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.userService.readinessProbe.httpGet.path }}
+            port: {{ .Values.userService.readinessProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.userService.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.userService.readinessProbe.periodSeconds }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.userService.resources | nindent 10 }}
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+      volumes:
+      - name: app-code
+        configMap:
+          name: {{ include "user-service.fullname" . }}-code
+      initContainers:
+      - name: install-dependencies
+        image: "{{ .Values.userService.image.repository }}:{{ .Values.userService.image.tag }}"
+        command: ['sh', '-c', 'cd /app && npm install']
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+{{- end }}

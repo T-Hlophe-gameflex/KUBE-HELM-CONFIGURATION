@@ -1,0 +1,22 @@
+{{- if .Values.logstash.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-logstash
+  namespace: monitoring
+  labels:
+    app: logstash
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.logstash.service.type }}
+  ports:
+  - port: {{ .Values.logstash.service.beatsPort }}
+    targetPort: 5044
+    name: beats
+  - port: {{ .Values.logstash.service.httpPort }}
+    targetPort: 9600
+    name: http
+  selector:
+    app: logstash
+    {{- include "elk-stack-platform.selectorLabels" . | nindent 4 }}
+{{- end }}

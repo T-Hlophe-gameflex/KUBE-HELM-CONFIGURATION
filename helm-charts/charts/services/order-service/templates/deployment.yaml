@@ -1,0 +1,88 @@
+{{- if .Values.orderService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "order-service.fullname" . }}
+  namespace: backend
+  labels:
+    {{- include "order-service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.orderService.autoscaling.enabled }}
+  replicas: {{ .Values.orderService.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "order-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-service.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: order-service
+        image: "{{ .Values.orderService.image.repository }}:{{ .Values.orderService.image.tag }}"
+        imagePullPolicy: {{ .Values.orderService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.orderService.application.port }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ .Values.orderService.application.metricsPort }}
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: {{ .Values.orderService.application.environment.NODE_ENV }}
+        - name: LOG_LEVEL
+          value: {{ .Values.orderService.application.logging.level }}
+        - name: SERVICE_NAME
+          value: {{ .Values.orderService.application.environment.SERVICE_NAME }}
+        - name: SERVICE_GROUP
+          value: {{ .Values.orderService.application.environment.SERVICE_GROUP }}
+        - name: NAMESPACE
+          value: {{ .Values.orderService.application.environment.NAMESPACE }}
+        - name: DB_HOST
+          value: {{ .Values.orderService.application.database.host }}
+        - name: DB_PORT
+          value: {{ .Values.orderService.application.database.port | quote }}
+        - name: DB_NAME
+          value: {{ .Values.orderService.application.database.name }}
+        - name: DB_USER
+          value: {{ .Values.orderService.application.database.user }}
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "order-service.fullname" . }}-secret
+              key: db-password
+        {{- if .Values.orderService.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.orderService.livenessProbe.httpGet.path }}
+            port: {{ .Values.orderService.livenessProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.orderService.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.orderService.livenessProbe.periodSeconds }}
+        {{- end }}
+        {{- if .Values.orderService.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.orderService.readinessProbe.httpGet.path }}
+            port: {{ .Values.orderService.readinessProbe.httpGet.port }}
+          initialDelaySeconds: {{ .Values.orderService.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.orderService.readinessProbe.periodSeconds }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.orderService.resources | nindent 10 }}
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+      volumes:
+      - name: app-code
+        configMap:
+          name: {{ include "order-service.fullname" . }}-code
+      initContainers:
+      - name: install-dependencies
+        image: "{{ .Values.orderService.image.repository }}:{{ .Values.orderService.image.tag }}"
+        command: ['sh', '-c', 'cd /app && npm install']
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+{{- end }}

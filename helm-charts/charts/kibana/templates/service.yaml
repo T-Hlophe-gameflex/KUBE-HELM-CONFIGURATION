@@ -1,0 +1,19 @@
+{{- if .Values.kibana.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "elk-stack-platform.fullname" . }}-kibana
+  namespace: monitoring
+  labels:
+    app: kibana
+    {{- include "elk-stack-platform.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.kibana.service.type }}
+  ports:
+  - port: {{ .Values.kibana.service.port }}
+    targetPort: 5601
+    name: ui
+  selector:
+    app: kibana
+    {{- include "elk-stack-platform.selectorLabels" . | nindent 4 }}
+{{- end }}
