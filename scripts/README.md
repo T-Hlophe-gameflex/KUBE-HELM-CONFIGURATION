@@ -1,53 +1,28 @@
 # Scripts
 
-Utility scripts for cluster setup and testing.
+Utility scripts for cluster setup and log generation.
 
 ## Available Scripts
 
-### setup-simple.sh
-Creates a local Kind cluster for development.
+### setup-kubespray.sh
+Creates a Kubespray cluster for development.
 
 ```bash
 make setup
-# Or directly: ./scripts/setup-simple.sh
 ```
 
 ### generate-sample-logs.sh
-Generates realistic test logs for ELK Stack validation.
+Generates test logs for ELK Stack validation.
 
 ```bash
 make generate-logs
-# Or directly: ./scripts/generate-sample-logs.sh 50
 ```
 
-**Generates:**
+**Generated log data includes:**
 - Multiple log levels (INFO, WARN, ERROR, DEBUG)
-- Multiple services (order, user, payment, notification, analytics)
+- Multiple services (order, user, payment, notification)
 - HTTP metadata (status codes, response times)
-- Trace IDs for distributed tracing
 - Kubernetes pod metadata
-
-The following scripts have been **archived** and replaced with Helm-native features:
-
-#### `deploy-helm.sh` ❌
-**Replaced by**: Direct `helm upgrade --install` commands in `Makefile`
-
-**Old way**:
-```bash
-./scripts/deploy-helm.sh deploy all
-```
-
-**New way**:
-```bash
-make deploy
-```
-
-**Why**: The 300+ lines of bash logic are now handled by Helm natively. The Makefile shows exactly what's being deployed - no hidden logic!
-
----
-
-#### `test-elk-deployment.sh` ❌
-**Replaced by**: Helm test pods in `helm-charts/templates/tests/`
 
 **Old way**:
 ```bash

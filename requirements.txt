@@ -1,47 +1,22 @@
-ansible>=2.12,<2.15# Kubespray + Helm ELK Stack Platform Dependencies
-
-jinja2>=3.0.0# Core requirements for Kubespray, Ansible, and Helm
-
-netaddr
-
-pbr>=5.4.5# Ansible Core
-
-jmespathansible>=6.0.0,<8.0.0
-
-ruamel.yaml>=0.17.21ansible-core>=2.13.0,<2.16.0
-
-cryptography>=3.4.8
-
-kubernetes>=12.0.0# Kubernetes and Helm support
-
-kubernetes>=24.2.0
-kubernetes-client>=24.2.0
+# Core dependencies
+ansible>=6.0.0,<8.0.0
+ansible-core>=2.13.0,<2.16.0
+jinja2>=3.0.0
+netaddr>=0.7.19
 pyyaml>=6.0
 
-# Kubespray Dependencies
-netaddr>=0.7.19
-Jinja2>=2.11.3
-ruamel.yaml>=0.16.10
-ruamel.yaml.clib>=0.2.6
-MarkupSafe>=1.1.1
-
-# Helm Python integration
-helm-cli>=0.1.0
-
-# Additional tools for cluster management
+# Kubernetes support
+kubernetes>=24.2.0
 cryptography>=3.4.8
 jmespath>=0.9.5
-pbr>=5.4.4
+
+# Kubespray dependencies
+ruamel.yaml>=0.17.21
+ruamel.yaml.clib>=0.2.6
+MarkupSafe>=1.1.1
+pbr>=5.4.5
+
+# Additional tools
 requests>=2.25.1
 urllib3>=1.26.0
 jsonpatch>=1.32
-
-# Development and testing
-yamllint>=1.26.0
-molecule>=3.4.0
-pytest>=6.2.0
-pytest-ansible>=3.1.0
-
-# Documentation (optional)
-sphinx>=5.0.0
-sphinx-rtd-theme>=1.0.0

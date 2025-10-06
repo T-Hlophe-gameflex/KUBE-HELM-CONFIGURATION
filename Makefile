@@ -5,27 +5,24 @@ INVENTORY := $(KUBESPRAY_DIR)/inventory/helm-kube-cluster/inventory.ini
 NAMESPACE := monitoring
 
 help:
-	@echo "ELK Stack Platform - Kubespray Deployment"
-	@echo "=========================================="
+	@echo "ELK Stack Platform"
+	@echo "=================="
 	@echo ""
 	@echo "Cluster:"
-	@echo "  setup      - Deploy Kubespray cluster + ELK + logs"
+	@echo "  setup      - Deploy cluster"
 	@echo "  clean      - Destroy cluster"
 	@echo ""
 	@echo "Deployment:"
-	@echo "  deploy     - Deploy ELK stack (Ansible)"
+	@echo "  deploy     - Deploy ELK stack"
 	@echo "  remove     - Remove deployments"
 	@echo "  validate   - Validate deployments"
 	@echo ""
 	@echo "Access:"
-	@echo "  kibana     - Port-forward Kibana (5601)"
-	@echo "  info       - Show cluster info"
+	@echo "  kibana     - Port-forward Kibana"
 	@echo "  status     - Show deployment status"
-	@echo "  logs       - View logs"
 	@echo ""
 	@echo "Utilities:"
-	@echo "  generate-logs - Start log generation"
-	@echo ""
+	@echo "  generate-logs - Generate sample logs"
 
 setup:
 	@./scripts/setup-kubespray.sh
@@ -45,22 +42,16 @@ validate:
 
 status:
 	@kubectl get pods -A
-	@echo ""
 	@kubectl get svc -A
-
-info:
-	@kubectl cluster-info
-	@echo ""
-	@kubectl get nodes -o wide
 
 kibana:
 	@pkill -f "kubectl port-forward.*5601" 2>/dev/null || true
-	@echo "Kibana: http://localhost:5601"
+	@echo "Kibana available at: http://localhost:5601"
 	@kubectl port-forward -n $(NAMESPACE) svc/kibana 5601:5601
 
 logs:
-	@kubectl logs -n backend -l app=order-service --tail=50
-	@kubectl logs -n backend -l app=user-service --tail=50
+	@kubectl logs -n backend -l app=order-service --tail=20
+	@kubectl logs -n backend -l app=user-service --tail=20
 
 generate-logs:
 	@./scripts/generate-sample-logs.sh &

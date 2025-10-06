@@ -1,32 +1,32 @@
-# ELK Stack Platform Helm Charts
+# ELK Stack Helm Charts
 
-Modular Helm charts for deploying ELK Stack with microservices on Kubernetes.
+Helm charts for deploying ELK Stack with microservices.
 
 ## Charts Structure
 
 ```text
 charts/
-├── elasticsearch/    # Search & analytics (8.10.4)
-├── kibana/          # Visualization UI (8.10.4)
+├── elasticsearch/    # Search and analytics engine
+├── kibana/          # Data visualization interface  
 ├── logstash/        # Log processing pipeline
-├── filebeat/        # Log collector (DaemonSet)
-├── metallb/         # LoadBalancer config (172.18.255.200-250)
-└── services/        # Business services
-    ├── order-service/  # Order management REST API
-    ├── user-service/   # User management REST API
-    └── postgres/       # PostgreSQL 15 database
+├── filebeat/        # Log data collector
+├── metallb/         # Load balancer configuration
+└── services/        # Application services
+    ├── order-service/  # Order management API
+    ├── user-service/   # User management API
+    └── postgres/       # PostgreSQL database
 ```
 
-## Quick Deploy
+## Deployment
 
 ```bash
-# Observability stack
+# ELK stack components
 helm upgrade --install elasticsearch ./charts/elasticsearch -n monitoring --create-namespace
 helm upgrade --install kibana ./charts/kibana -n monitoring
 helm upgrade --install logstash ./charts/logstash -n monitoring
 helm upgrade --install filebeat ./charts/filebeat -n monitoring
 
-# Infrastructure & services
+# Services and infrastructure
 helm upgrade --install metallb ./charts/metallb -n metallb-system --create-namespace
 helm upgrade --install postgres ./charts/services/postgres -n database --create-namespace
 helm upgrade --install order-service ./charts/services/order-service -n backend --create-namespace
@@ -37,15 +37,12 @@ helm upgrade --install user-service ./charts/services/user-service -n backend
 
 - Kubernetes 1.20+
 - Helm 3.x
-- PV provisioner (optional, for persistence)
 
 ## Testing
 
 ```bash
 helm test elasticsearch -n monitoring
 helm test kibana -n monitoring
-helm test logstash -n monitoring
-helm test filebeat -n monitoring
 ```
 
 ## Configuration

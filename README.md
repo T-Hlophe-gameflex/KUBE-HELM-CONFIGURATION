@@ -1,17 +1,17 @@
-# Kubernetes ELK Stack + Microservices Platform
+# Kubernetes ELK Stack Platform
 
-Production-ready logging infrastructure with business applications using Helm, Ansible, and Kubespray.
+Production logging infrastructure with microservices using Helm, Ansible, and Kubespray.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-make setup    # Create Kind cluster
-make deploy   # Deploy full stack (ELK + MetalLB + Services)
-make test     # Run health checks
-make kibana   # Access Kibana → http://localhost:5601
+make setup    # Create cluster
+make deploy   # Deploy ELK stack and services
+make status   # Check deployment status
+make kibana   # Access Kibana at http://localhost:5601
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -56,101 +56,97 @@ make kibana   # Access Kibana → http://localhost:5601
         └──────────────────────────────────┘
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 helm-charts/charts/
-├── elasticsearch/     # Search & analytics (config/application-template.json)
-├── kibana/           # Visualization dashboard
-├── logstash/         # Log processing (config/logstash-template.json)
-├── filebeat/         # Log collector (config/filebeat-template.json)
-├── metallb/          # LoadBalancer config
-└── services/         # Business services
-    ├── order-service/  # Order management REST API (Node.js)
-    ├── user-service/   # User management REST API (Node.js)
-    └── postgres/       # PostgreSQL 15 database
+├── elasticsearch/     # Search and analytics engine
+├── kibana/           # Data visualization dashboard
+├── logstash/         # Log processing pipeline
+├── filebeat/         # Log data shipper
+├── metallb/          # Load balancer configuration
+└── services/         # Application services
+    ├── order-service/  # Order management API
+    ├── user-service/   # User management API
+    └── postgres/       # PostgreSQL database
 
-playbooks/                 # Ansible automation
-├── main.yml              # Main orchestrator
+playbooks/                 # Ansible deployment automation
+├── main.yml              # Main orchestration playbook
 └── tasks/
-    ├── deploy-helm.yml   # Deploy all charts
-    ├── remove-helm.yml   # Remove all releases
-    └── validate-cluster.yml
+    ├── deploy-helm.yml   # Deploy all Helm charts
+    ├── remove-helm.yml   # Remove all deployments
+    └── validate-cluster.yml # Validate cluster state
 
-inventory/mycluster/       # Kubespray cluster config
-scripts/                   # Utility scripts (setup, generate-logs)
+inventory/mycluster/       # Kubespray cluster configuration
+scripts/                   # Utility scripts
 ```
 
-## 🛠️ Prerequisites
+## Prerequisites
 
-- Kubernetes 1.20+ (Kind for local development)
+- Kubernetes 1.20+
 - Helm 3.x
 - Ansible 2.9+
 - kubectl configured
 
-## 📦 Deployment
+## Deployment
 
 ```bash
-# Complete setup (recommended)
+# Complete deployment
 make setup && make deploy
 
-# Using Ansible directly
+# Deploy using Ansible directly
 ansible-playbook playbooks/main.yml -e action=deploy
 
 # Deploy specific components
 ansible-playbook playbooks/main.yml -e action=deploy \
   -e deploy_postgres=true \
-  -e deploy_order_service=true \
-  -e deploy_user_service=true
+  -e deploy_order_service=true
 ```
 
-## ✅ Verification
+## Verification
 
 ```bash
-make test     # Run Helm tests
-make status   # Check pod status
-make kibana   # Access Kibana UI
+make status   # Check deployment status
+make kibana   # Access Kibana interface
 ```
 
-## 🔧 Common Operations
+## Operations
 
 ```bash
 # Access services
 make kibana           # Port-forward to Kibana (5601)
-make elasticsearch    # Port-forward to Elasticsearch (9200)
 
 # Management
-make upgrade          # Upgrade deployment
-make remove           # Uninstall deployment
+make remove           # Remove deployments
 make clean            # Delete cluster
 
-# Utilities
-make generate-logs    # Generate sample logs
+# Generate test data
+make generate-logs    # Generate sample log entries
 ```
 
-## 📊 Services & Endpoints
+## Services
 
 | Service | Namespace | Port | Access |
 |---------|-----------|------|--------|
-| Elasticsearch | monitoring | 9200 | LoadBalancer (172.18.255.200) |
-| Kibana | monitoring | 5601 | LoadBalancer (172.18.255.202) |
+| Elasticsearch | monitoring | 9200 | LoadBalancer |
+| Kibana | monitoring | 5601 | LoadBalancer |
 | Logstash | monitoring | 5044, 9600 | ClusterIP |
 | Filebeat | monitoring | - | DaemonSet |
 | PostgreSQL | database | 5432 | ClusterIP |
 | Order Service | backend | 8080 | ClusterIP |
 | User Service | backend | 8081 | ClusterIP |
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ```bash
-# Check status
+# Check deployment status
 kubectl get pods -A
 kubectl get svc -A
 
-# View logs
+# View component logs
 kubectl logs -n monitoring deployment/elasticsearch
 kubectl logs -n monitoring deployment/kibana
 
-# Debug connectivity
+# Test connectivity
 kubectl exec -it -n monitoring deployment/elasticsearch -- curl http://localhost:9200
 ```

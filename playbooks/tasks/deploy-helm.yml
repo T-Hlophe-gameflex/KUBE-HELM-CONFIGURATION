@@ -90,4 +90,4 @@
 
     - name: Display deployment results
       debug:
-        msg: "All charts deployed successfully - ELK Stack, MetalLB, Database, and Business Services"
+        msg: "All charts deployed successfully"

@@ -36,4 +36,4 @@
       
     - name: Display removal results
       debug:
-        msg: "All charts removed successfully - ELK Stack, MetalLB, Database, and Business Services"
+        msg: "All charts removed successfully"
