@@ -1,0 +1,70 @@
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: {{ include "awx.instanceName" . }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "awx.labels" . | nindent 4 }}
+spec:
+  service_type: {{ .Values.awx.serviceType }}
+  {{- if eq .Values.awx.serviceType "nodeport" }}
+  {{- if .Values.awx.nodePort }}
+  nodeport_port: {{ .Values.awx.nodePort }}
+  {{- end }}
+  {{- end }}
+  
+  # PostgreSQL configuration
+  postgres_storage_class: {{ include "awx.storageClassName" . }}
+  {{- if .Values.postgres.dataVolumeInit }}
+  postgres_data_volume_init: {{ .Values.postgres.dataVolumeInit }}
+  {{- end }}
+  {{- if .Values.postgres.initContainerCommands }}
+  postgres_init_container_commands: |
+    {{- .Values.postgres.initContainerCommands | nindent 4 }}
+  {{- end }}
+  
+  # Resource configuration
+  {{- if .Values.resources.web }}
+  web_resource_requirements:
+    limits:
+      cpu: {{ .Values.resources.web.limits.cpu }}
+      memory: {{ .Values.resources.web.limits.memory }}
+    requests:
+      cpu: {{ .Values.resources.web.requests.cpu }}
+      memory: {{ .Values.resources.web.requests.memory }}
+  {{- end }}
+  
+  {{- if .Values.resources.task }}
+  task_resource_requirements:
+    limits:
+      cpu: {{ .Values.resources.task.limits.cpu }}
+      memory: {{ .Values.resources.task.limits.memory }}
+    requests:
+      cpu: {{ .Values.resources.task.requests.cpu }}
+      memory: {{ .Values.resources.task.requests.memory }}
+  {{- end }}
+  
+  {{- if .Values.resources.postgres }}
+  postgres_resource_requirements:
+    limits:
+      cpu: {{ .Values.resources.postgres.limits.cpu }}
+      memory: {{ .Values.resources.postgres.limits.memory }}
+    requests:
+      cpu: {{ .Values.resources.postgres.requests.cpu }}
+      memory: {{ .Values.resources.postgres.requests.memory }}
+  {{- end }}
+  
+  # Admin configuration
+  {{- if .Values.awx.admin.email }}
+  admin_email: {{ .Values.awx.admin.email }}
+  {{- end }}
+  {{- if .Values.awx.admin.password }}
+  admin_password_secret: {{ include "awx.instanceName" . }}-admin-password
+  {{- end }}
+  
+  # Additional settings
+  {{- if .Values.awx.projectDataDir }}
+  projects_persistence: true
+  projects_storage_class: {{ include "awx.storageClassName" . }}
+  projects_storage_size: 8Gi
+  {{- end }}

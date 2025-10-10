@@ -1,0 +1,211 @@
+# AWX Job Template Configuration for Cloudflare DNS Management
+# This file defines Job Templates and Surveys for dynamic Cloudflare DNS operations
+# Import this configuration into AWX after deployment
+
+job_templates:
+  - name: "Cloudflare DNS Management"
+    description: "Dynamic Cloudflare DNS record management with survey support"
+    job_type: "run"
+    inventory: "localhost"
+    project: "Cloudflare DNS Project"
+    playbook: "cloudflare-dns-playbook.yml"
+    credential: "Cloudflare API Credentials"
+    verbosity: 2
+    ask_variables_on_launch: true
+    survey_enabled: true
+    become_enabled: false
+    
+    # Survey Configuration
+    survey_spec:
+      name: "Cloudflare DNS Management Survey"
+      description: "Configure DNS operations for Cloudflare domains"
+      spec:
+        - question_name: "Domain Selection"
+          question_description: "Select the domain to manage"
+          required: true
+          type: "multiplechoice"
+          variable: "survey_domain"
+          choices:
+            - "example.com"
+            - "test-domain.com" 
+            - "dev.example.com"
+            - "staging.example.com"
+            - "prod.example.com"
+          default: "example.com"
+          
+        - question_name: "DNS Operation"
+          question_description: "Select the operation to perform"
+          required: true
+          type: "multiplechoice"
+          variable: "survey_operation"
+          choices:
+            - "create"
+            - "update" 
+            - "delete"
+            - "bulk_create"
+            - "list"
+          default: "create"
+          
+        - question_name: "Record Name"
+          question_description: "DNS record name (without domain)"
+          required: true
+          type: "text"
+          variable: "survey_record_name"
+          default: "www"
+          min: 1
+          max: 63
+          
+        - question_name: "Record Type"
+          question_description: "DNS record type"
+          required: true
+          type: "multiplechoice"
+          variable: "survey_record_type"
+          choices:
+            - "A"
+            - "AAAA"
+            - "CNAME"
+            - "MX"
+            - "TXT"
+            - "SRV"
+            - "CAA"
+          default: "A"
+          
+        - question_name: "Record Value"
+          question_description: "DNS record value (IP, hostname, or text)"
+          required: true
+          type: "text"
+          variable: "survey_record_value"
+          default: "192.168.1.100"
+          min: 1
+          max: 255
+          
+        - question_name: "TTL (Time To Live)"
+          question_description: "DNS record TTL in seconds"
+          required: false
+          type: "multiplechoice"
+          variable: "survey_record_ttl"
+          choices:
+            - "300"    # 5 minutes
+            - "1800"   # 30 minutes
+            - "3600"   # 1 hour
+            - "7200"   # 2 hours
+            - "14400"  # 4 hours
+            - "28800"  # 8 hours
+            - "86400"  # 24 hours
+          default: "300"
+          
+        - question_name: "Cloudflare Proxy"
+          question_description: "Enable Cloudflare proxy (orange cloud)"
+          required: false
+          type: "multiplechoice"
+          variable: "survey_record_proxied"
+          choices:
+            - "false"
+            - "true"
+          default: "false"
+          
+        - question_name: "Bulk Records (JSON)"
+          question_description: "JSON array for bulk operations (optional)"
+          required: false
+          type: "textarea"
+          variable: "survey_bulk_records"
+          default: |
+            [
+              {
+                "name": "api",
+                "type": "A",
+                "value": "192.168.1.101",
+                "ttl": 300,
+                "proxied": true
+              },
+              {
+                "name": "mail",
+                "type": "A", 
+                "value": "192.168.1.102",
+                "ttl": 300,
+                "proxied": false
+              }
+            ]
+            
+        - question_name: "Cloudflare Zone ID"
+          question_description: "Cloudflare Zone ID (optional, for performance)"
+          required: false
+          type: "text"
+          variable: "survey_zone_id"
+          default: ""
+          min: 0
+          max: 32
+
+  # Additional Job Template for Zone Management
+  - name: "Cloudflare Zone Info"
+    description: "Get Cloudflare zone information and DNS records"
+    job_type: "run"
+    inventory: "localhost"
+    project: "Cloudflare DNS Project"
+    playbook: "cloudflare-zone-info.yml"
+    credential: "Cloudflare API Credentials"
+    verbosity: 1
+    survey_enabled: true
+    
+    survey_spec:
+      name: "Zone Information Survey"
+      description: "Select domain to inspect"
+      spec:
+        - question_name: "Domain"
+          question_description: "Domain to inspect"
+          required: true
+          type: "multiplechoice"
+          variable: "survey_domain"
+          choices:
+            - "example.com"
+            - "test-domain.com"
+            - "dev.example.com"
+            - "staging.example.com"
+            - "prod.example.com"
+          default: "example.com"
+
+# Credential Types
+credential_types:
+  - name: "Cloudflare API"
+    description: "Cloudflare API credentials"
+    kind: "cloud"
+    inputs:
+      fields:
+        - id: "api_token"
+          type: "string"
+          label: "Cloudflare API Token"
+          secret: true
+          help_text: "Cloudflare API Token with DNS:Edit permissions"
+        - id: "email"
+          type: "string"
+          label: "Cloudflare Account Email"
+          help_text: "Your Cloudflare account email (for legacy auth)"
+        - id: "global_api_key"
+          type: "string"
+          label: "Cloudflare Global API Key"
+          secret: true
+          help_text: "Cloudflare Global API Key (for legacy auth)"
+    injectors:
+      env:
+        CLOUDFLARE_API_TOKEN: "{{ api_token }}"
+        CLOUDFLARE_EMAIL: "{{ email }}"
+        CLOUDFLARE_API_KEY: "{{ global_api_key }}"
+
+# Projects
+projects:
+  - name: "Cloudflare DNS Project"
+    description: "Cloudflare DNS management playbooks"
+    scm_type: "git"
+    scm_url: "https://github.com/your-org/cloudflare-playbooks.git"
+    # For local development, you can use:
+    # local_path: "/var/lib/awx/projects/cloudflare"
+
+# Inventories
+inventories:
+  - name: "localhost"
+    description: "Local execution inventory"
+    hosts:
+      - name: "localhost"
+        variables:
+          ansible_connection: "local"
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"

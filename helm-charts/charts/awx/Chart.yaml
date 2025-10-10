@@ -1,0 +1,19 @@
+apiVersion: v2
+name: awx
+description: A Helm chart for Ansible AWX - Web-based user interface for Ansible automation
+type: application
+version: 0.1.0
+appVersion: "24.6.1"
+keywords:
+  - ansible
+  - automation
+  - awx
+  - tower
+home: https://github.com/ansible/awx
+sources:
+  - https://github.com/ansible/awx-operator
+dependencies:
+  - name: awx-operator
+    version: "2.19.1"
+    repository: "https://ansible-community.github.io/awx-operator-helm/"
+    condition: awxOperator.enabled

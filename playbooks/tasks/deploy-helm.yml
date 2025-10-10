@@ -87,6 +87,48 @@
         --wait --timeout 5m
       register: user_service_deploy
       when: deploy_user_service | default(true)
+      
+    - name: Add AWX Operator Helm repository
+      command: >
+        helm repo add awx-operator https://ansible-community.github.io/awx-operator-helm/
+      register: awx_repo_add
+      when: deploy_awx | default(false)
+      
+    - name: Update Helm repositories
+      command: helm repo update
+      when: deploy_awx | default(false)
+      
+    - name: Install AWX Operator
+      command: >
+        helm upgrade --install awx-operator awx-operator/awx-operator
+        --namespace awx-system
+        --create-namespace
+        --wait --timeout 10m
+      register: awx_operator_deploy
+      when: deploy_awx | default(false)
+      
+    - name: Ensure AWX storage directory exists on nodes
+      file:
+        path: /mnt/awx-storage
+        state: directory
+        mode: '0755'
+      become: yes
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['kube_node'] | default([]) }}"
+      when: 
+        - deploy_awx | default(false)
+        - groups['kube_node'] is defined
+      
+    - name: Deploy AWX chart
+      command: >
+        helm upgrade --install awx
+        {{ helm_charts_dir }}/charts/awx
+        --namespace awx
+        --create-namespace
+        --values {{ helm_charts_dir }}/charts/awx/values.yaml
+        --wait --timeout 15m
+      register: awx_deploy
+      when: deploy_awx | default(false)
 
     - name: Display deployment results
       debug:

@@ -1,15 +1,58 @@
 # Scripts
 
-Utility scripts for cluster setup and log generation.
+Utility scripts for cluster setup, deployment, and testing.
 
 ## Available Scripts
 
+### Core Setup Scripts
+
+#### setup-kind.sh
+Creates a basic Kind cluster with ELK Stack.
+
+```bash
+./scripts/setup-kind.sh
+```
+
+#### setup-kind-with-awx.sh (NEW)
+Creates a complete Kind cluster with ELK Stack, AWX, and Cloudflare integration.
+
+```bash
+./scripts/setup-kind-with-awx.sh
+```
+
+**Features:**
+- Complete ELK Stack deployment
+- AWX automation platform with web UI
+- Cloudflare DNS integration
+- PostgreSQL database
+- Order and User services
+- Automatic port mapping for AWX (localhost:30080)
+
 ### setup-kubespray.sh
-Creates a Kubespray cluster for development.
+Creates a Kubespray cluster for production environments.
 
 ```bash
 make setup
 ```
+
+### Testing Scripts
+
+#### test-cloudflare-dns.sh (NEW)
+Tests Cloudflare DNS integration with the deployed cluster.
+
+```bash
+./scripts/test-cloudflare-dns.sh
+```
+
+**Prerequisites:**
+- Running Kubernetes cluster
+- .env file with CLOUDFLARE_API_TOKEN and FIRST_DOMAIN
+
+**Tests performed:**
+- API connectivity verification
+- Single DNS record creation
+- Bulk DNS record creation
+- Job execution validation
 
 ### generate-sample-logs.sh
 Generates test logs for ELK Stack validation.

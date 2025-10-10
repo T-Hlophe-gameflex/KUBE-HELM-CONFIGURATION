@@ -1,0 +1,89 @@
+# Default values for Cloudflare Helm chart
+# This is a YAML-formatted file.
+
+# Cloudflare API configuration
+cloudflare:
+  # Cloudflare API token (required for authentication)
+  apiToken: ""
+  
+  # Cloudflare account email (legacy auth, prefer apiToken)
+  email: ""
+  
+  # Cloudflare Global API Key (legacy auth, prefer apiToken)
+  globalApiKey: ""
+  
+  # Cloudflare Zone ID (optional, can be discovered)
+  zoneId: ""
+  
+  # Domain name for DNS operations
+  domain: "example.com"
+  
+  # DNS records to manage
+  dnsRecords:
+    - name: "test"
+      type: "A"
+      value: "192.168.1.100"
+      ttl: 300
+      proxied: false
+    - name: "api"
+      type: "CNAME"
+      value: "test.example.com"
+      ttl: 300
+      proxied: true
+
+# Ansible job configuration
+ansible:
+  # Image for running Ansible playbooks
+  image: "quay.io/ansible/awx-ee:latest"
+  
+  # Pull policy for the image
+  imagePullPolicy: IfNotPresent
+  
+  # Ansible collections to install
+  collections:
+    - name: "cloudflare.cloudflare"
+      version: "latest"
+
+# Job configuration
+job:
+  # Name of the Kubernetes job
+  name: "cloudflare-dns-update"
+  
+  # Namespace for the job
+  namespace: "default"
+  
+  # Restart policy for the job
+  restartPolicy: OnFailure
+  
+  # Backoff limit for failed jobs
+  backoffLimit: 3
+  
+  # TTL for finished jobs (in seconds)
+  ttlSecondsAfterFinished: 300
+  
+  # Cron schedule for recurring jobs (optional)
+  # schedule: "0 */6 * * *"  # Every 6 hours
+
+# Resources for the job pod
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000

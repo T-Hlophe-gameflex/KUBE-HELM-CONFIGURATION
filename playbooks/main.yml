@@ -18,6 +18,9 @@
     action: "{{ action | default('deploy') }}"
     
   tasks:
+    - name: Install required Ansible collections
+      include_tasks: tasks/install-collections.yml
+      
     - name: Display action
       debug:
         msg: "Executing action: {{ action }}"

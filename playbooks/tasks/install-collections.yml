@@ -1,0 +1,28 @@
+---
+# Install Ansible Collections
+- name: Install required Ansible collections
+  block:
+    - name: Install Cloudflare collection
+      ansible.builtin.command:
+        cmd: ansible-galaxy collection install cloudflare.cloudflare --force
+      register: cloudflare_collection_install
+      changed_when: "'Successfully installed' in cloudflare_collection_install.stdout"
+      
+    - name: Install Kubernetes collection
+      ansible.builtin.command:
+        cmd: ansible-galaxy collection install kubernetes.core --force
+      register: k8s_collection_install
+      changed_when: "'Successfully installed' in k8s_collection_install.stdout"
+      
+    - name: Install Community General collection
+      ansible.builtin.command:
+        cmd: ansible-galaxy collection install community.general --force
+      register: community_collection_install
+      changed_when: "'Successfully installed' in community_collection_install.stdout"
+      
+    - name: Display collection installation results
+      debug:
+        msg: 
+          - "Cloudflare collection: {{ 'Installed' if cloudflare_collection_install.changed else 'Already up to date' }}"
+          - "Kubernetes collection: {{ 'Installed' if k8s_collection_install.changed else 'Already up to date' }}"
+          - "Community General collection: {{ 'Installed' if community_collection_install.changed else 'Already up to date' }}"

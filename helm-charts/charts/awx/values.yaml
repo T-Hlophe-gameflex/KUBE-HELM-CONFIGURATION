@@ -1,0 +1,129 @@
+# Default values for AWX Helm chart
+# This is a YAML-formatted file.
+
+# AWX instance configuration
+awx:
+  # AWX instance name
+  name: ansible-awx
+  # Service type for AWX (ClusterIP, NodePort, LoadBalancer)
+  serviceType: nodeport
+  # Node port for AWX service (only used when serviceType is NodePort)
+  nodePort: 30080
+  
+  # Admin user configuration
+  admin:
+    email: admin@example.com
+    password: ""  # If empty, a random password will be generated
+    
+  # AWX project data directory
+  projectDataDir: /var/lib/awx/projects
+  
+  # AWX settings
+  settings:
+    debugMode: false
+    logLevel: INFO
+
+# PostgreSQL configuration
+postgres:
+  # Storage configuration
+  storage:
+    # Storage class for PostgreSQL persistent volume
+    storageClass: local-storage
+    # Size of the persistent volume
+    size: 5Gi
+    # Access modes for the persistent volume
+    accessModes:
+      - ReadWriteOnce
+    # Host path for local storage (only used with local-storage class)
+    hostPath: /mnt/awx-storage
+    
+  # PostgreSQL configuration
+  config:
+    # PostgreSQL version
+    version: "13"
+    # Database name
+    database: awx
+    # PostgreSQL user
+    user: awx
+    
+  # Data volume initialization
+  dataVolumeInit: true
+  
+  # Init container commands for proper permissions
+  initContainerCommands: |
+    mkdir -p /var/lib/postgresql/data/userdata
+    chown 26:0 /var/lib/postgresql/data/
+    chown 26:0 /var/lib/postgresql/data/userdata/
+    chmod 700 /var/lib/postgresql/data
+    chmod 700 /var/lib/postgresql/data/userdata
+
+# AWX Operator configuration
+awxOperator:
+  enabled: true
+  # Namespace for AWX operator
+  namespace: awx-system
+  # Create namespace if it doesn't exist
+  createNamespace: true
+
+# Namespace configuration
+namespace:
+  # AWX namespace
+  name: awx
+  # Create namespace if it doesn't exist
+  create: true
+
+# Resource configuration
+resources:
+  # Web container resources
+  web:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+      
+  # Task container resources  
+  task:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+      
+  # PostgreSQL resources
+  postgres:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: awx.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

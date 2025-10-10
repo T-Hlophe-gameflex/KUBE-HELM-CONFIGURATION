@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cloudflare.fullname" . }}-playbook
+  namespace: {{ .Values.job.namespace }}
+  labels:
+    {{- include "cloudflare.labels" . | nindent 4 }}
+data:
+  playbook.yml: |
+    ---
+    - name: Manage Cloudflare DNS Records
+      hosts: localhost
+      connection: local
+      gather_facts: false
+      vars:
+        cloudflare_domain: "{{ .Values.cloudflare.domain }}"
+        dns_records:
+          {{- range .Values.cloudflare.dnsRecords }}
+          - name: "{{ .name }}"
+            type: "{{ .type }}"
+            value: "{{ .value }}"
+            ttl: {{ .ttl | default 300 }}
+            {{- if hasKey . "proxied" }}
+            proxied: {{ .proxied }}
+            {{- end }}
+          {{- end }}
+      
+      tasks:
+        - name: Install Cloudflare collection
+          ansible.builtin.command:
+            cmd: ansible-galaxy collection install cloudflare.cloudflare
+          delegate_to: localhost
+          run_once: true
+          
+        - name: Debug DNS records to be created/updated
+          ansible.builtin.debug:
+            var: dns_records
+            
+        - name: Manage DNS records
+          cloudflare.cloudflare.cloudflare_dns:
+            zone: "{{ cloudflare_domain }}"
+            record: "{{ item.name }}"
+            type: "{{ item.type }}"
+            value: "{{ item.value }}"
+            ttl: "{{ item.ttl | default(300) }}"
+            {{- if .Values.cloudflare.apiToken }}
+            api_token: "{{ "{{" }} ansible_env.CLOUDFLARE_API_TOKEN {{ "}}" }}"
+            {{- else }}
+            account_email: "{{ "{{" }} ansible_env.CLOUDFLARE_EMAIL {{ "}}" }}"
+            account_api_key: "{{ "{{" }} ansible_env.CLOUDFLARE_API_KEY {{ "}}" }}"
+            {{- end }}
+            {{- if hasKey (index .Values.cloudflare.dnsRecords 0) "proxied" }}
+            proxied: "{{ "{{" }} item.proxied | default(false) {{ "}}" }}"
+            {{- end }}
+            state: present
+          loop: "{{ "{{" }} dns_records {{ "}}" }}"
+          register: dns_results
+          
+        - name: Display DNS management results
+          ansible.builtin.debug:
+            msg: "DNS record {{ "{{" }} item.item.name {{ "}}" }}.{{ "{{" }} cloudflare_domain {{ "}}" }} {{ "{{" }} 'updated' if item.changed else 'already exists' {{ "}}" }}"
+          loop: "{{ "{{" }} dns_results.results {{ "}}" }}"
