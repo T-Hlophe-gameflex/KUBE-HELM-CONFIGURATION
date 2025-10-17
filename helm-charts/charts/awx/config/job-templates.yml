@@ -3,63 +3,63 @@
 # Import this configuration into AWX after deployment
 
 job_templates:
-  - name: "Cloudflare DNS Management"
-    description: "Dynamic Cloudflare DNS record management with survey support"
+  - name: "Cloudflare Domain Sync"
+    description: "Sync Cloudflare domains to AWX surveys dynamically"
     job_type: "run"
     inventory: "localhost"
     project: "Cloudflare DNS Project"
-    playbook: "cloudflare-dns-playbook.yml"
+    playbook: "sync-cloudflare-domains.yml"
     credential: "Cloudflare API Credentials"
-    verbosity: 2
+    verbosity: 1
+    survey_enabled: false
+    ask_variables_on_launch: false
+    become_enabled: false
+  - name: "Cloudflare Domain Operations"
+    description: "Manage domain-level DNS records with standards-aware defaults"
+    job_type: "run"
+    inventory: "localhost"
+    project: "Cloudflare DNS Project"
+    playbook: "automation/cloudflare-standardize.yml"
+    credential: "Cloudflare API Credentials"
+    verbosity: 1
     ask_variables_on_launch: true
     survey_enabled: true
     become_enabled: false
-    
-    # Survey Configuration
+    extra_vars: |
+      workflow: manage_record
+      enforce_domain_standards: true
+
     survey_spec:
-      name: "Cloudflare DNS Management Survey"
-      description: "Configure DNS operations for Cloudflare domains"
+      name: "Domain Operations Survey"
+      description: "Select a domain, review standard settings, and capture record details for creation or update."
       spec:
-        - question_name: "Domain Selection"
-          question_description: "Select the domain to manage"
+        - question_name: "Domain"
+          question_description: "Domain to manage. Updated dynamically by the survey sync playbook."
           required: true
           type: "multiplechoice"
           variable: "survey_domain"
           choices:
             - "example.com"
-            - "test-domain.com" 
+            - "test-domain.com"
             - "dev.example.com"
             - "staging.example.com"
             - "prod.example.com"
           default: "example.com"
-          
-        - question_name: "DNS Operation"
-          question_description: "Select the operation to perform"
-          required: true
-          type: "multiplechoice"
-          variable: "survey_operation"
-          choices:
-            - "create"
-            - "update" 
-            - "delete"
-            - "bulk_create"
-            - "list"
-          default: "create"
-          
+
         - question_name: "Record Name"
-          question_description: "DNS record name (without domain)"
+          question_description: "Record host label (use '@' for root)."
           required: true
           type: "text"
-          variable: "survey_record_name"
+          variable: "record_name"
           default: "www"
           min: 1
           max: 63
-          
+
         - question_name: "Record Type"
-          question_description: "DNS record type"
+          question_description: "DNS record type to create or update."
           required: true
           type: "multiplechoice"
-          variable: "survey_record_type"
+          variable: "record_type"
           choices:
             - "A"
             - "AAAA"
@@ -68,73 +68,209 @@ job_templates:
             - "TXT"
             - "SRV"
             - "CAA"
+            - "NS"
           default: "A"
-          
+
         - question_name: "Record Value"
-          question_description: "DNS record value (IP, hostname, or text)"
+          question_description: "Target IP, hostname, or text content for the record."
           required: true
           type: "text"
-          variable: "survey_record_value"
-          default: "192.168.1.100"
-          min: 1
-          max: 255
-          
-        - question_name: "TTL (Time To Live)"
-          question_description: "DNS record TTL in seconds"
-          required: false
-          type: "multiplechoice"
-          variable: "survey_record_ttl"
-          choices:
-            - "300"    # 5 minutes
-            - "1800"   # 30 minutes
-            - "3600"   # 1 hour
-            - "7200"   # 2 hours
-            - "14400"  # 4 hours
-            - "28800"  # 8 hours
-            - "86400"  # 24 hours
-          default: "300"
-          
-        - question_name: "Cloudflare Proxy"
-          question_description: "Enable Cloudflare proxy (orange cloud)"
-          required: false
-          type: "multiplechoice"
-          variable: "survey_record_proxied"
-          choices:
-            - "false"
-            - "true"
-          default: "false"
-          
-        - question_name: "Bulk Records (JSON)"
-          question_description: "JSON array for bulk operations (optional)"
-          required: false
-          type: "textarea"
-          variable: "survey_bulk_records"
-          default: |
-            [
-              {
-                "name": "api",
-                "type": "A",
-                "value": "192.168.1.101",
-                "ttl": 300,
-                "proxied": true
-              },
-              {
-                "name": "mail",
-                "type": "A", 
-                "value": "192.168.1.102",
-                "ttl": 300,
-                "proxied": false
-              }
-            ]
-            
-        - question_name: "Cloudflare Zone ID"
-          question_description: "Cloudflare Zone ID (optional, for performance)"
+          variable: "record_value"
+          default: ""
+
+        - question_name: "Record Comment"
+          question_description: "Optional comment to store with the record (max 100 characters)."
           required: false
           type: "text"
-          variable: "survey_zone_id"
+          variable: "record_comment"
           default: ""
-          min: 0
-          max: 32
+          max: 100
+
+        - question_name: "Record Tags"
+          question_description: "Optional comma-separated tags to attach to the record."
+          required: false
+          type: "text"
+          variable: "record_tags"
+          default: ""
+
+        - question_name: "TTL"
+          question_description: "Time-to-live in seconds. 'auto' maps to Cloudflare's automatic TTL (300s)."
+          required: true
+          type: "multiplechoice"
+          variable: "record_ttl"
+          choices:
+            - "auto"
+            - "60"
+            - "120"
+            - "300"
+            - "600"
+            - "3600"
+            - "7200"
+            - "18000"
+            - "43200"
+            - "86400"
+          default: "auto"
+
+        - question_name: "Proxy Status"
+          question_description: "Whether Cloudflare should proxy this record."
+          required: true
+          type: "multiplechoice"
+          variable: "record_proxied"
+          choices:
+            - "true"
+            - "false"
+          default: "true"
+
+        - question_name: "Apply Standard Zone Settings"
+          question_description: "Also enforce standardized zone settings for the selected domain after record changes."
+          required: true
+          type: "multiplechoice"
+          variable: "enforce_domain_standards"
+          choices:
+            - "true"
+            - "false"
+          default: "true"
+
+        - question_name: "Standards Profile"
+          question_description: "Path inside the project for the standards definition file."
+          required: false
+          type: "text"
+          variable: "standards_file"
+          default: "automation/cloudflare-standards.yml"
+
+  - name: "Cloudflare Global Baseline"
+    description: "Normalize TTL and proxy posture across all selected domains"
+    job_type: "run"
+    inventory: "localhost"
+    project: "Cloudflare DNS Project"
+    playbook: "automation/cloudflare-standardize.yml"
+    credential: "Cloudflare API Credentials"
+    verbosity: 1
+    ask_variables_on_launch: true
+    survey_enabled: true
+    extra_vars: |
+      workflow: global_standardize
+
+    survey_spec:
+      name: "Global Baseline Survey"
+      description: "Select domains and confirm global record standards to enforce."
+      spec:
+        - question_name: "Target Domains"
+          question_description: "Domains to normalize. Leave empty to include all managed domains from the standards profile."
+          required: false
+          type: "multiselect"
+          variable: "target_domains"
+          choices:
+            - "example.com"
+            - "test-domain.com"
+            - "dev.example.com"
+            - "staging.example.com"
+            - "prod.example.com"
+          default: ""
+
+        - question_name: "Enforce TTL"
+          question_description: "Override defaults for the run. 'auto' converts to Cloudflare's automatic TTL."
+          required: false
+          type: "multiplechoice"
+          variable: "global_record_ttl"
+          choices:
+            - ""
+            - "auto"
+            - "60"
+            - "120"
+            - "300"
+            - "600"
+            - "3600"
+            - "7200"
+            - "18000"
+            - "43200"
+            - "86400"
+          default: ""
+
+        - question_name: "Enforce Proxy Status"
+          question_description: "Leave blank to keep standards file defaults."
+          required: false
+          type: "multiplechoice"
+          variable: "global_record_proxied"
+          choices:
+            - ""
+            - "true"
+            - "false"
+          default: ""
+
+        - question_name: "Standards Profile"
+          question_description: "Path inside the project for the standards definition file."
+          required: false
+          type: "text"
+          variable: "standards_file"
+          default: "automation/cloudflare-standards.yml"
+
+  - name: "Cloudflare Platform Sync"
+    description: "Clone standard record presets from a template domain into peers"
+    job_type: "run"
+    inventory: "localhost"
+    project: "Cloudflare DNS Project"
+    playbook: "automation/cloudflare-standardize.yml"
+    credential: "Cloudflare API Credentials"
+    verbosity: 1
+    ask_variables_on_launch: true
+    survey_enabled: true
+    extra_vars: |
+      workflow: platform_sync
+
+    survey_spec:
+      name: "Platform Sync Survey"
+      description: "Choose template and target domains, then select the preset or record keys to synchronize."
+      spec:
+        - question_name: "Template Domain"
+          question_description: "Source domain for the record clone operation."
+          required: true
+          type: "multiplechoice"
+          variable: "template_domain"
+          choices:
+            - "example.com"
+            - "test-domain.com"
+            - "dev.example.com"
+            - "staging.example.com"
+            - "prod.example.com"
+          default: "example.com"
+
+        - question_name: "Target Domains"
+          question_description: "Domains that should receive the records."
+          required: true
+          type: "multiselect"
+          variable: "target_domains"
+          choices:
+            - "example.com"
+            - "test-domain.com"
+            - "dev.example.com"
+            - "staging.example.com"
+            - "prod.example.com"
+          default: ""
+
+        - question_name: "Platform Preset"
+          question_description: "Preset from the standards file describing which record keys to sync."
+          required: true
+          type: "multiplechoice"
+          variable: "platform_preset"
+          choices:
+            - "full"
+            - "web-only"
+          default: "full"
+
+        - question_name: "Record Keys Override"
+          question_description: "Optional comma-separated list of record keys to sync instead of the preset."
+          required: false
+          type: "text"
+          variable: "record_keys"
+          default: ""
+
+        - question_name: "Standards Profile"
+          question_description: "Path inside the project for the standards definition file."
+          required: false
+          type: "text"
+          variable: "standards_file"
+          default: "automation/cloudflare-standards.yml"
 
   # Additional Job Template for Zone Management
   - name: "Cloudflare Zone Info"

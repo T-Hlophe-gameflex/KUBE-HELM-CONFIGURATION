@@ -1,0 +1,298 @@
+---
+- name: Master Deployment Playbook - Deploy Complete Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Global deployment configuration
+    deployment_mode: "{{ deployment_mode | default('complete') }}"  # complete, elk-only, apps-only
+    cluster_setup: "{{ cluster_setup | default(true) }}"
+    cleanup_before_deploy: "{{ cleanup_before_deploy | default(false) }}"
+    
+    # Namespace configuration
+    elk_namespace: "{{ elk_namespace | default('elastic-stack') }}"
+    app_namespace: "{{ app_namespace | default('app-services') }}"
+    metallb_namespace: "{{ metallb_namespace | default('metallb-system') }}"
+    
+    # Resource configuration
+    storage_class: "{{ storage_class | default('standard') }}"
+    expose_services: "{{ expose_services | default(true) }}"
+    
+    # ELK Stack configuration
+    elasticsearch_replicas: "{{ elasticsearch_replicas | default(1) }}"
+    elasticsearch_memory: "{{ elasticsearch_memory | default('2Gi') }}"
+    elasticsearch_storage: "{{ elasticsearch_storage | default('10Gi') }}"
+    
+    # Application configuration
+    postgres_password: "{{ postgres_password | default('changeme123') }}"
+    order_service_image: "{{ order_service_image | default('order-service:latest') }}"
+    user_service_image: "{{ user_service_image | default('user-service:latest') }}"
+    
+    # MetalLB configuration
+    metallb_ip_range: "{{ metallb_ip_range | default('172.18.255.200-172.18.255.250') }}"
+    
+  pre_tasks:
+    - name: Display deployment configuration
+      debug:
+        msg: |
+          🚀 Infrastructure Deployment Configuration
+          ========================================
+          Deployment Mode: {{ deployment_mode }}
+          Cluster Setup: {{ cluster_setup }}
+          Cleanup Before Deploy: {{ cleanup_before_deploy }}
+          
+          📦 Components to Deploy:
+          {% if deployment_mode == 'complete' or deployment_mode == 'elk-only' %}
+          ✅ ELK Stack ({{ elk_namespace }})
+          {% endif %}
+          {% if deployment_mode == 'complete' or deployment_mode == 'apps-only' %}
+          ✅ Application Services ({{ app_namespace }})
+          {% endif %}
+          {% if expose_services %}
+          ✅ MetalLB Load Balancer ({{ metallb_namespace }})
+          {% endif %}
+          
+          🔧 Resource Configuration:
+          - Storage Class: {{ storage_class }}
+          - Expose Services: {{ expose_services }}
+          - ElasticSearch Memory: {{ elasticsearch_memory }}
+          - IP Range: {{ metallb_ip_range }}
+          
+    - name: Validate Kubernetes cluster connectivity
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: cluster_nodes
+      failed_when: cluster_nodes.resources | length == 0
+      
+    - name: Display cluster information
+      debug:
+        msg: |
+          🎯 Kubernetes Cluster Status:
+          Nodes Available: {{ cluster_nodes.resources | length }}
+          {% for node in cluster_nodes.resources %}
+          - {{ node.metadata.name }}: {{ node.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first }}
+          {% endfor %}
+          
+    - name: Cleanup existing deployments
+      include_tasks: cleanup-deployments.yml
+      when: cleanup_before_deploy
+      
+  tasks:
+    # MetalLB Setup (if exposing services)
+    - name: Deploy MetalLB Load Balancer
+      block:
+        - name: Create MetalLB namespace
+          kubernetes.core.k8s:
+            name: "{{ metallb_namespace }}"
+            api_version: v1
+            kind: Namespace
+            state: present
+            
+        - name: Apply MetalLB manifest
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                namespace: "{{ metallb_namespace }}"
+                name: config
+              data:
+                config: |
+                  address-pools:
+                  - name: default
+                    protocol: layer2
+                    addresses:
+                    - {{ metallb_ip_range }}
+                    
+        - name: Deploy MetalLB controller
+          kubernetes.core.k8s:
+            state: present
+            src: https://raw.githubusercontent.com/metallb/metallb/v0.13.12/config/manifests/metallb-native.yaml
+            
+        - name: Create MetalLB IP Address Pool
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: metallb.io/v1beta1
+              kind: IPAddressPool
+              metadata:
+                name: default-pool
+                namespace: "{{ metallb_namespace }}"
+              spec:
+                addresses:
+                - "{{ metallb_ip_range }}"
+                
+        - name: Create MetalLB L2 Advertisement
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: metallb.io/v1beta1
+              kind: L2Advertisement
+              metadata:
+                name: default-l2advertisement
+                namespace: "{{ metallb_namespace }}"
+              spec:
+                ipAddressPools:
+                - default-pool
+                
+        - name: Wait for MetalLB to be ready
+          kubernetes.core.k8s_info:
+            api_version: apps/v1
+            kind: Deployment
+            name: controller
+            namespace: "{{ metallb_namespace }}"
+            wait: true
+            wait_condition:
+              type: Available
+              status: "True"
+            wait_timeout: 300
+            
+      when: expose_services and cluster_setup
+      
+    # ELK Stack Deployment
+    - name: Deploy ELK Stack
+      include_tasks: deploy-elk-stack.yml
+      vars:
+        namespace: "{{ elk_namespace }}"
+      when: deployment_mode == 'complete' or deployment_mode == 'elk-only'
+      
+    # Application Services Deployment
+    - name: Deploy Application Services
+      include_tasks: deploy-app-services.yml
+      vars:
+        namespace: "{{ app_namespace }}"
+      when: deployment_mode == 'complete' or deployment_mode == 'apps-only'
+      
+    # Post-deployment validation
+    - name: Validate ELK Stack deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: StatefulSet
+        name: elasticsearch
+        namespace: "{{ elk_namespace }}"
+      register: elk_status
+      when: deployment_mode == 'complete' or deployment_mode == 'elk-only'
+      
+    - name: Validate Application Services deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: postgres
+        namespace: "{{ app_namespace }}"
+      register: app_status
+      when: deployment_mode == 'complete' or deployment_mode == 'apps-only'
+      
+    - name: Get service endpoints
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        label_selectors:
+          - "app in (kibana, order-service, user-service)"
+      register: service_endpoints
+      when: expose_services
+      
+    - name: Display deployment results
+      debug:
+        msg: |
+          🎉 Deployment Complete!
+          =====================
+          
+          {% if deployment_mode == 'complete' or deployment_mode == 'elk-only' %}
+          📊 ELK Stack Status:
+          {% if elk_status.resources %}
+          ✅ Elasticsearch: {{ elk_status.resources[0].status.readyReplicas | default(0) }}/{{ elk_status.resources[0].spec.replicas }} replicas ready
+          {% else %}
+          ❌ ELK Stack: Not deployed or failed
+          {% endif %}
+          {% endif %}
+          
+          {% if deployment_mode == 'complete' or deployment_mode == 'apps-only' %}
+          🚀 Application Services Status:
+          {% if app_status.resources %}
+          ✅ PostgreSQL: {{ app_status.resources[0].status.readyReplicas | default(0) }}/{{ app_status.resources[0].spec.replicas }} replicas ready
+          {% else %}
+          ❌ Application Services: Not deployed or failed
+          {% endif %}
+          {% endif %}
+          
+          {% if expose_services and service_endpoints.resources %}
+          🌐 External Service Endpoints:
+          {% for service in service_endpoints.resources %}
+          {% if service.status.loadBalancer.ingress %}
+          - {{ service.metadata.name }}: {{ service.status.loadBalancer.ingress[0].ip }}:{{ service.spec.ports[0].port }}
+          {% else %}
+          - {{ service.metadata.name }}: Pending LoadBalancer IP...
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          
+          📋 Useful Commands:
+          # Check all pods
+          kubectl get pods --all-namespaces
+          
+          # Check services
+          kubectl get svc --all-namespaces
+          
+          {% if deployment_mode == 'complete' or deployment_mode == 'elk-only' %}
+          # Access Kibana
+          kubectl port-forward svc/kibana 5601:5601 -n {{ elk_namespace }}
+          {% endif %}
+          
+          {% if deployment_mode == 'complete' or deployment_mode == 'apps-only' %}
+          # Check application logs
+          kubectl logs -f deployment/order-service -n {{ app_namespace }}
+          kubectl logs -f deployment/user-service -n {{ app_namespace }}
+          {% endif %}
+          
+          🔧 Troubleshooting:
+          # Check events
+          kubectl get events --sort-by=.metadata.creationTimestamp
+          
+          # Describe problematic resources
+          kubectl describe pod <pod-name> -n <namespace>
+          
+  post_tasks:
+    - name: Save deployment configuration
+      copy:
+        content: |
+          # Deployment Configuration - {{ ansible_date_time.iso8601 }}
+          deployment_mode: {{ deployment_mode }}
+          elk_namespace: {{ elk_namespace }}
+          app_namespace: {{ app_namespace }}
+          metallb_namespace: {{ metallb_namespace }}
+          storage_class: {{ storage_class }}
+          expose_services: {{ expose_services }}
+          elasticsearch_replicas: {{ elasticsearch_replicas }}
+          metallb_ip_range: {{ metallb_ip_range }}
+        dest: ./deployment-config.yml
+        
+    - name: Generate cleanup script
+      copy:
+        content: |
+          #!/bin/bash
+          # Generated cleanup script - {{ ansible_date_time.iso8601 }}
+          set -e
+          
+          echo "🧹 Cleaning up deployment..."
+          
+          {% if deployment_mode == 'complete' or deployment_mode == 'elk-only' %}
+          echo "Removing ELK Stack..."
+          kubectl delete namespace {{ elk_namespace }} --ignore-not-found=true
+          {% endif %}
+          
+          {% if deployment_mode == 'complete' or deployment_mode == 'apps-only' %}
+          echo "Removing Application Services..."
+          kubectl delete namespace {{ app_namespace }} --ignore-not-found=true
+          {% endif %}
+          
+          {% if expose_services %}
+          echo "Removing MetalLB..."
+          kubectl delete namespace {{ metallb_namespace }} --ignore-not-found=true
+          {% endif %}
+          
+          echo "✅ Cleanup complete!"
+        dest: ./cleanup-deployment.sh
+        mode: '0755'

@@ -1,0 +1,64 @@
+{% set results = [] %}
+{% set ttl_auto = ttl_auto_value %}
+{% set default_ttl = record_defaults.ttl if record_defaults is defined and record_defaults.ttl is defined else none %}
+{% set default_proxied = record_defaults.proxied if record_defaults is defined and record_defaults.proxied is defined else none %}
+{% set template_records = domain_records.get(template_domain, []) if template_domain else [] %}
+{% for domain in managed_domain_list %}
+  {% set domain_exclusions = platform_exclusions.get(domain, []) if platform_exclusions is defined else [] %}
+  {% for record_key in selected_record_keys %}
+    {% if record_key in standard_records %}
+      {% if record_key not in domain_exclusions %}
+        {% set record_def = standard_records[record_key] %}
+        {% set desired_name = record_def.get('name') %}
+        {% set desired_type = record_def.get('type') %}
+        {% if desired_name is none or desired_type is none %}
+          {% set _ = results.append({'error': 'missing_definition', 'record_key': record_key}) %}
+          {% continue %}
+        {% endif %}
+        {% set raw_ttl = record_def.get('ttl', default_ttl) %}
+        {% set desired_ttl = ttl_auto if raw_ttl == 'auto' else raw_ttl %}
+        {% if desired_ttl is none %}
+          {% set desired_ttl = ttl_auto %}
+        {% endif %}
+        {% set desired_proxied = record_def.get('proxied', default_proxied) %}
+        {% set desired_value = record_def.get('value') %}
+        {% if record_def.get('copy_from_source', false) %}
+          {% if not template_domain %}
+            {% set _ = results.append({'error': 'template_domain_required', 'record_key': record_key}) %}
+            {% continue %}
+          {% endif %}
+          {% set template_fqdn = template_domain if desired_name in ['@', template_domain] else desired_name ~ '.' ~ template_domain %}
+          {% set source_match = none %}
+          {% for candidate in template_records %}
+            {% if candidate.name == template_fqdn and candidate.type == desired_type %}
+              {% set source_match = candidate %}
+              {% break %}
+            {% endif %}
+          {% endfor %}
+          {% if source_match %}
+            {% set desired_value = source_match.content %}
+          {% else %}
+            {% set _ = results.append({'error': 'template_record_missing', 'record_key': record_key, 'template_domain': template_domain}) %}
+            {% continue %}
+          {% endif %}
+        {% endif %}
+        {% if desired_value is not none %}
+          {% set _ = results.append({
+            'domain': domain,
+            'record_key': record_key,
+            'name': desired_name,
+            'type': desired_type,
+            'value': desired_value,
+            'ttl': desired_ttl,
+            'proxied': desired_proxied
+          }) %}
+        {% else %}
+          {% set _ = results.append({'error': 'missing_value', 'record_key': record_key}) %}
+        {% endif %}
+      {% endif %}
+    {% else %}
+      {% set _ = results.append({'error': 'unknown_record_key', 'record_key': record_key}) %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{{ results | to_nice_yaml }}

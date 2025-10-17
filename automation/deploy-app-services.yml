@@ -1,0 +1,562 @@
+---
+- name: Deploy Application Services (Order Service, User Service, PostgreSQL)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    namespace: "{{ namespace | default('app-services') }}"
+    postgres_password: "{{ postgres_password | default('changeme123') }}"
+    postgres_user: "{{ postgres_user | default('appuser') }}"
+    postgres_db: "{{ postgres_db | default('appdb') }}"
+    postgres_storage: "{{ postgres_storage | default('5Gi') }}"
+    storage_class: "{{ storage_class | default('standard') }}"
+    order_service_replicas: "{{ order_service_replicas | default(2) }}"
+    user_service_replicas: "{{ user_service_replicas | default(2) }}"
+    order_service_image: "{{ order_service_image | default('order-service:latest') }}"
+    user_service_image: "{{ user_service_image | default('user-service:latest') }}"
+    expose_services: "{{ expose_services | default(true) }}"
+    
+  tasks:
+    - name: Create namespace
+      kubernetes.core.k8s:
+        name: "{{ namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+        
+    - name: Create PostgreSQL Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: postgres-secret
+            namespace: "{{ namespace }}"
+          type: Opaque
+          data:
+            postgres-password: "{{ postgres_password | b64encode }}"
+            postgres-user: "{{ postgres_user | b64encode }}"
+            postgres-db: "{{ postgres_db | b64encode }}"
+            
+    - name: Create PostgreSQL PVC
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: postgres-pvc
+            namespace: "{{ namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: "{{ storage_class }}"
+            resources:
+              requests:
+                storage: "{{ postgres_storage }}"
+                
+    - name: Deploy PostgreSQL
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: postgres
+            namespace: "{{ namespace }}"
+            labels:
+              app: postgres
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: postgres
+            template:
+              metadata:
+                labels:
+                  app: postgres
+              spec:
+                containers:
+                - name: postgres
+                  image: postgres:15-alpine
+                  ports:
+                  - containerPort: 5432
+                  env:
+                  - name: POSTGRES_DB
+                    valueFrom:
+                      secretKeyRef:
+                        name: postgres-secret
+                        key: postgres-db
+                  - name: POSTGRES_USER
+                    valueFrom:
+                      secretKeyRef:
+                        name: postgres-secret
+                        key: postgres-user
+                  - name: POSTGRES_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: postgres-secret
+                        key: postgres-password
+                  - name: PGDATA
+                    value: /var/lib/postgresql/data/pgdata
+                  volumeMounts:
+                  - name: postgres-storage
+                    mountPath: /var/lib/postgresql/data
+                  resources:
+                    limits:
+                      memory: "512Mi"
+                      cpu: "500m"
+                    requests:
+                      memory: "256Mi"
+                      cpu: "250m"
+                  livenessProbe:
+                    exec:
+                      command:
+                      - /bin/sh
+                      - -c
+                      - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                    successThreshold: 1
+                    failureThreshold: 6
+                  readinessProbe:
+                    exec:
+                      command:
+                      - /bin/sh
+                      - -c
+                      - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p 5432
+                    initialDelaySeconds: 5
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                    successThreshold: 1
+                    failureThreshold: 3
+                volumes:
+                - name: postgres-storage
+                  persistentVolumeClaim:
+                    claimName: postgres-pvc
+                    
+    - name: Create PostgreSQL Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: postgres
+            namespace: "{{ namespace }}"
+            labels:
+              app: postgres
+          spec:
+            selector:
+              app: postgres
+            ports:
+            - port: 5432
+              targetPort: 5432
+              
+    - name: Create Application Secrets for Order Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: order-service-secret
+            namespace: "{{ namespace }}"
+          type: Opaque
+          data:
+            db-host: "{{ 'postgres' | b64encode }}"
+            db-port: "{{ '5432' | b64encode }}"
+            db-name: "{{ postgres_db | b64encode }}"
+            db-user: "{{ postgres_user | b64encode }}"
+            db-password: "{{ postgres_password | b64encode }}"
+            jwt-secret: "{{ 'order-service-jwt-secret-key' | b64encode }}"
+            
+    - name: Create Application Secrets for User Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: user-service-secret
+            namespace: "{{ namespace }}"
+          type: Opaque
+          data:
+            db-host: "{{ 'postgres' | b64encode }}"
+            db-port: "{{ '5432' | b64encode }}"
+            db-name: "{{ postgres_db | b64encode }}"
+            db-user: "{{ postgres_user | b64encode }}"
+            db-password: "{{ postgres_password | b64encode }}"
+            jwt-secret: "{{ 'user-service-jwt-secret-key' | b64encode }}"
+            
+    - name: Create Order Service ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: order-service-config
+            namespace: "{{ namespace }}"
+          data:
+            app-name: "order-service"
+            log-level: "INFO"
+            server-port: "8080"
+            metrics-enabled: "true"
+            health-check-enabled: "true"
+            
+    - name: Create User Service ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: user-service-config
+            namespace: "{{ namespace }}"
+          data:
+            app-name: "user-service"
+            log-level: "INFO"
+            server-port: "8080"
+            metrics-enabled: "true"
+            health-check-enabled: "true"
+            
+    - name: Deploy Order Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: order-service
+            namespace: "{{ namespace }}"
+            labels:
+              app: order-service
+          spec:
+            replicas: "{{ order_service_replicas }}"
+            selector:
+              matchLabels:
+                app: order-service
+            template:
+              metadata:
+                labels:
+                  app: order-service
+              spec:
+                containers:
+                - name: order-service
+                  image: "{{ order_service_image }}"
+                  ports:
+                  - containerPort: 8080
+                  env:
+                  - name: DB_HOST
+                    valueFrom:
+                      secretKeyRef:
+                        name: order-service-secret
+                        key: db-host
+                  - name: DB_PORT
+                    valueFrom:
+                      secretKeyRef:
+                        name: order-service-secret
+                        key: db-port
+                  - name: DB_NAME
+                    valueFrom:
+                      secretKeyRef:
+                        name: order-service-secret
+                        key: db-name
+                  - name: DB_USER
+                    valueFrom:
+                      secretKeyRef:
+                        name: order-service-secret
+                        key: db-user
+                  - name: DB_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: order-service-secret
+                        key: db-password
+                  - name: JWT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: order-service-secret
+                        key: jwt-secret
+                  - name: APP_NAME
+                    valueFrom:
+                      configMapKeyRef:
+                        name: order-service-config
+                        key: app-name
+                  - name: LOG_LEVEL
+                    valueFrom:
+                      configMapKeyRef:
+                        name: order-service-config
+                        key: log-level
+                  - name: SERVER_PORT
+                    valueFrom:
+                      configMapKeyRef:
+                        name: order-service-config
+                        key: server-port
+                  resources:
+                    limits:
+                      memory: "512Mi"
+                      cpu: "500m"
+                    requests:
+                      memory: "256Mi"
+                      cpu: "250m"
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 8080
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                  readinessProbe:
+                    httpGet:
+                      path: /ready
+                      port: 8080
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                    
+    - name: Deploy User Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: user-service
+            namespace: "{{ namespace }}"
+            labels:
+              app: user-service
+          spec:
+            replicas: "{{ user_service_replicas }}"
+            selector:
+              matchLabels:
+                app: user-service
+            template:
+              metadata:
+                labels:
+                  app: user-service
+              spec:
+                containers:
+                - name: user-service
+                  image: "{{ user_service_image }}"
+                  ports:
+                  - containerPort: 8080
+                  env:
+                  - name: DB_HOST
+                    valueFrom:
+                      secretKeyRef:
+                        name: user-service-secret
+                        key: db-host
+                  - name: DB_PORT
+                    valueFrom:
+                      secretKeyRef:
+                        name: user-service-secret
+                        key: db-port
+                  - name: DB_NAME
+                    valueFrom:
+                      secretKeyRef:
+                        name: user-service-secret
+                        key: db-name
+                  - name: DB_USER
+                    valueFrom:
+                      secretKeyRef:
+                        name: user-service-secret
+                        key: db-user
+                  - name: DB_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: user-service-secret
+                        key: db-password
+                  - name: JWT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: user-service-secret
+                        key: jwt-secret
+                  - name: APP_NAME
+                    valueFrom:
+                      configMapKeyRef:
+                        name: user-service-config
+                        key: app-name
+                  - name: LOG_LEVEL
+                    valueFrom:
+                      configMapKeyRef:
+                        name: user-service-config
+                        key: log-level
+                  - name: SERVER_PORT
+                    valueFrom:
+                      configMapKeyRef:
+                        name: user-service-config
+                        key: server-port
+                  resources:
+                    limits:
+                      memory: "512Mi"
+                      cpu: "500m"
+                    requests:
+                      memory: "256Mi"
+                      cpu: "250m"
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 8080
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                  readinessProbe:
+                    httpGet:
+                      path: /ready
+                      port: 8080
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                    
+    - name: Create Order Service LoadBalancer
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: order-service
+            namespace: "{{ namespace }}"
+            labels:
+              app: order-service
+          spec:
+            type: LoadBalancer
+            selector:
+              app: order-service
+            ports:
+            - port: 80
+              targetPort: 8080
+              protocol: TCP
+      when: expose_services
+      
+    - name: Create User Service LoadBalancer
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: user-service
+            namespace: "{{ namespace }}"
+            labels:
+              app: user-service
+          spec:
+            type: LoadBalancer
+            selector:
+              app: user-service
+            ports:
+            - port: 80
+              targetPort: 8080
+              protocol: TCP
+      when: expose_services
+      
+    - name: Create Internal Services for Order Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: order-service-internal
+            namespace: "{{ namespace }}"
+            labels:
+              app: order-service
+          spec:
+            selector:
+              app: order-service
+            ports:
+            - port: 8080
+              targetPort: 8080
+              protocol: TCP
+      when: not expose_services
+      
+    - name: Create Internal Services for User Service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: user-service-internal
+            namespace: "{{ namespace }}"
+            labels:
+              app: user-service
+          spec:
+            selector:
+              app: user-service
+            ports:
+            - port: 8080
+              targetPort: 8080
+              protocol: TCP
+      when: not expose_services
+      
+    - name: Wait for PostgreSQL to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: postgres
+        namespace: "{{ namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Wait for services to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: "{{ item }}"
+        namespace: "{{ namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      loop:
+        - order-service
+        - user-service
+        
+    - name: Display deployment summary
+      debug:
+        msg: |
+          Application Services Deployment Summary:
+          =======================================
+          Namespace: {{ namespace }}
+          
+          Components Deployed:
+          ✅ PostgreSQL ({{ postgres_storage }} storage)
+          ✅ Order Service ({{ order_service_replicas }} replicas)
+          ✅ User Service ({{ user_service_replicas }} replicas)
+          
+          Database Configuration:
+          🗄️  Database: {{ postgres_db }}
+          👤 User: {{ postgres_user }}
+          🔐 Password: [HIDDEN]
+          
+          {% if expose_services %}
+          External Access:
+          🌐 Order Service: kubectl get svc order-service -n {{ namespace }}
+          🌐 User Service: kubectl get svc user-service -n {{ namespace }}
+          {% else %}
+          Internal Access:
+          🔗 Order Service: order-service-internal:8080
+          🔗 User Service: user-service-internal:8080
+          {% endif %}
+          
+          Health Checks:
+          ❤️  Order Service: /health endpoint on port 8080
+          ❤️  User Service: /health endpoint on port 8080
+          
+          Next Steps:
+          1. Check pod status: kubectl get pods -n {{ namespace }}
+          2. View logs: kubectl logs -f deployment/order-service -n {{ namespace }}
+          3. Test endpoints: curl http://<service-ip>/health

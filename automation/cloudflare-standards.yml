@@ -1,0 +1,63 @@
+---
+# Cloudflare standardization profile
+# Customize these values to define the desired state for your account.
+# The playbooks will load this file by default.
+
+# List of domains you want to manage. If empty, all domains in the account are used.
+managed_domains: []
+
+# Default record profile that should exist in every domain.
+# Keys are identifiers used in reports; "name" should be the host relative to the zone ("@" for root).
+standard_records:
+  core-web:
+    name: "www"
+    type: "A"
+    value: "203.0.113.10"
+    proxied: true
+    ttl: auto  # "auto" will be converted to Cloudflare's automatic TTL (value 1)
+  api-endpoint:
+    name: "api"
+    type: "A"
+    value: "203.0.113.20"
+    proxied: false
+    ttl: auto
+  root-record:
+    name: "@"
+    type: "A"
+    value: "203.0.113.5"
+    proxied: false
+    ttl: auto
+
+# Default settings to enforce on every zone.
+# Keys map directly to Cloudflare zone setting identifiers. Values should match Cloudflare API expectations.
+standard_zone_settings:
+  always_use_https: "on"
+  ssl: "full"
+  security_level: "medium"
+  min_tls_version: "1.2"
+  opportunistic_encryption: "on"
+
+# Default attributes to apply to *all* records during the global workflow.
+# Only include keys you want enforced. TTL value "auto" will translate to 1.
+record_defaults:
+  ttl: auto
+  proxied: null  # set to true/false to enforce, leave null to skip
+
+# Platform sync presets allow grouping records for cross-domain cloning.
+# Each preset defines which record identifiers (from standard_records) should be synchronized.
+platform_presets:
+  full:
+    description: "Clone all standard records"
+    record_keys:
+      - core-web
+      - api-endpoint
+      - root-record
+  web-only:
+    description: "Clone only customer-facing records"
+    record_keys:
+      - core-web
+
+# Optional exclusions per domain for platform sync (records that should be skipped).
+platform_exclusions:
+  # example2.com:
+  #   - root-record

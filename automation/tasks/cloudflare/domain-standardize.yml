@@ -1,0 +1,43 @@
+---
+# Align zone-level settings across managed domains.
+
+- name: Build zone/setting pairs
+  set_fact:
+    domain_setting_targets: "{{ managed_domain_list | product(standard_zone_settings | dict2items) | list }}"
+
+- name: Report when no zone settings defined
+  debug:
+    msg: "No standard zone settings configured."
+  when: standard_zone_settings | length == 0
+
+- name: Apply standard settings to each domain
+  uri:
+    url: "{{ api_base }}/zones/{{ zone_map[item.0] }}/settings/{{ item.1.key }}"
+    method: PATCH
+    headers: "{{ cloudflare_headers }}"
+    body_format: json
+    body:
+      value: "{{ item.1.value }}"
+    return_content: true
+  register: zone_setting_apply
+  loop: "{{ domain_setting_targets }}"
+  loop_control:
+    label: "{{ item.0 }} -> {{ item.1.key }}"
+  when:
+    - standard_zone_settings | length > 0
+    - domain_setting_targets | length > 0
+
+- name: Append zone standardization summary
+  set_fact:
+    change_log: "{{ change_log + [zone_setting_summary] }}"
+  loop: "{{ zone_setting_apply.results | default([]) }}"
+  loop_control:
+    loop_var: zone_result
+  vars:
+    zone_setting_summary:
+      workflow: domain_standardize
+      domain: "{{ zone_result.item.0 }}"
+      setting: "{{ zone_result.item.1.key }}"
+      value: "{{ zone_result.item.1.value }}"
+      status: {{ zone_result.json.success | default(false) | bool }}
+  when: zone_setting_apply is defined

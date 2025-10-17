@@ -1,0 +1,95 @@
+---
+# AWX Playbook: Sync Cloudflare Domains to AWX Surveys
+# Place this in your Cloudflare DNS Project repo
+
+- name: Sync Cloudflare Domains to AWX Template Surveys
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    awx_host: "{{ lookup('env', 'AWX_HOST') | default('http://localhost:80', true) }}"
+    awx_username: "{{ lookup('env', 'AWX_USERNAME') | default('admin', true) }}"
+    awx_password: "{{ lookup('env', 'AWX_PASSWORD') | default('admin', true) }}"
+    cloudflare_api_token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') }}"
+    governance_templates:
+      - name: "Cloudflare Domain Operations"
+        template_id: 25
+      - name: "Cloudflare Global Baseline"
+        template_id: 26
+      - name: "Cloudflare Platform Sync"
+        template_id: 27
+
+  tasks:
+    - name: Fail if Cloudflare API token is not set
+      fail:
+        msg: "CLOUDFLARE_API_TOKEN environment variable not set. Configure as an AWX credential."
+      when: cloudflare_api_token == ""
+
+    - name: Fetch all zones from Cloudflare
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: true
+        status_code: 200
+        validate_certs: false  # Set to true in production if your CA trust is correct
+      register: cloudflare_zones
+
+    - name: Extract zone names
+      set_fact:
+        domain_list: "{{ cloudflare_zones.json.result | map(attribute='name') | list }}"
+
+    - name: Display domains found
+      debug:
+        msg: "Found {{ domain_list | length }} Cloudflare domains: {{ domain_list | join(', ') }}"
+
+    - name: Fail if no domains found
+      fail:
+        msg: "No domains found in Cloudflare account. Check your API token permissions."
+      when: domain_list | length == 0
+
+    - name: Update survey for each governance template
+      uri:
+        url: "{{ awx_host }}/api/v2/job_templates/{{ item.template_id }}/survey_spec/"
+        method: GET
+        user: "{{ awx_username }}"
+        password: "{{ awx_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: current_survey
+      loop: "{{ governance_templates }}"
+      loop_control:
+        loop_var: item
+
+    - name: Patch survey with live domains
+      uri:
+        url: "{{ awx_host }}/api/v2/job_templates/{{ item.template_id }}/survey_spec/"
+        method: POST
+        user: "{{ awx_username }}"
+        password: "{{ awx_password }}"
+        force_basic_auth: true
+        body_format: json
+        body: >
+          {{
+            'name': current_survey.results[loop.index0].json.name,
+            'description': current_survey.results[loop.index0].json.description,
+            'spec': [
+              dict(q, **{'choices': domain_list, 'default': domain_list[0]}) if q.variable in ['domain', 'survey_domain', 'template_domain', 'target_domains'] and q.type in ['multiplechoice', 'multiselect'] else q
+              for q in current_survey.results[loop.index0].json.spec
+            ]
+          }}
+        status_code: 200
+      loop: "{{ governance_templates }}"
+      loop_control:
+        loop_var: item
+
+    - name: Log update status
+      debug:
+        msg: "✅ Updated {{ item.name }} (ID: {{ item.template_id }}) with {{ domain_list | length }} domains"
+      loop: "{{ governance_templates }}"
+      loop_control:
+        loop_var: item

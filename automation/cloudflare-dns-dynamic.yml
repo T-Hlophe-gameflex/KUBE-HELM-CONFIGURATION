@@ -1,0 +1,156 @@
+---
+- name: Dynamic Cloudflare DNS Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Default zone - will be dynamically populated
+    zone: ""
+    cloudflare_api_token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') }}"
+    
+    # Available domains for dropdown (fetched dynamically)
+    available_domains: []
+    
+    # DNS record configuration
+    dns_action: "{{ dns_action | default('create') }}"  # create, update, delete
+    record_name: "{{ record_name | default('') }}"
+    record_type: "{{ record_type | default('A') }}"
+    record_value: "{{ record_value | default('') }}"
+    record_ttl: "{{ record_ttl | default(300) }}"
+    
+  pre_tasks:
+    - name: Validate Cloudflare API Token
+      fail:
+        msg: "CLOUDFLARE_API_TOKEN environment variable is required"
+      when: cloudflare_api_token == ""
+      
+    - name: Fetch available domains from Cloudflare
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: cloudflare_zones
+      when: zone == ""
+      
+    - name: Extract domain names for selection
+      set_fact:
+        available_domains: "{{ cloudflare_zones.json.result | map(attribute='name') | list }}"
+      when: zone == "" and cloudflare_zones.json.success
+      
+    - name: Display available domains
+      debug:
+        msg: "Available domains: {{ available_domains }}"
+      when: zone == "" and available_domains | length > 0
+      
+    - name: Prompt for domain selection
+      pause:
+        prompt: |
+          Select a domain from the list:
+          {% for domain in available_domains %}
+          {{ loop.index }}. {{ domain }}
+          {% endfor %}
+          Enter the number of your choice
+      register: domain_choice
+      when: zone == "" and available_domains | length > 0
+      
+    - name: Set selected zone
+      set_fact:
+        zone: "{{ available_domains[domain_choice.user_input | int - 1] }}"
+      when: zone == "" and domain_choice is defined
+      
+    - name: Get zone ID for selected domain
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones?name={{ zone }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: zone_info
+      
+    - name: Set zone ID
+      set_fact:
+        zone_id: "{{ zone_info.json.result[0].id }}"
+      when: zone_info.json.result | length > 0
+
+  tasks:
+    - name: Display current configuration
+      debug:
+        msg: |
+          DNS Configuration:
+          - Domain: {{ zone }}
+          - Zone ID: {{ zone_id }}
+          - Action: {{ dns_action }}
+          - Record: {{ record_name }}.{{ zone if not record_name.endswith(zone) else record_name }}
+          - Type: {{ record_type }}
+          - Value: {{ record_value }}
+          - TTL: {{ record_ttl }}
+          
+    - name: Create DNS record
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: "{{ record_type }}"
+          name: "{{ record_name }}"
+          content: "{{ record_value }}"
+          ttl: "{{ record_ttl }}"
+        return_content: yes
+      register: dns_create_result
+      when: dns_action == "create"
+      
+    - name: Get existing DNS record for update/delete
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?name={{ record_name }}.{{ zone if not record_name.endswith(zone) else record_name }}&type={{ record_type }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: existing_record
+      when: dns_action in ["update", "delete"]
+      
+    - name: Update DNS record
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ existing_record.json.result[0].id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: "{{ record_type }}"
+          name: "{{ record_name }}"
+          content: "{{ record_value }}"
+          ttl: "{{ record_ttl }}"
+        return_content: yes
+      register: dns_update_result
+      when: dns_action == "update" and existing_record.json.result | length > 0
+      
+    - name: Delete DNS record
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ existing_record.json.result[0].id }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+      register: dns_delete_result
+      when: dns_action == "delete" and existing_record.json.result | length > 0
+      
+    - name: Display operation result
+      debug:
+        msg: |
+          DNS Operation Result:
+          - Action: {{ dns_action }}
+          - Success: {{ (dns_create_result.json.success | default(false)) or (dns_update_result.json.success | default(false)) or (dns_delete_result.json.success | default(false)) }}
+          - Record: {{ record_name }}.{{ zone if not record_name.endswith(zone) else record_name }}
+          - Status: {% if dns_action == "create" and dns_create_result is defined %}Created{% elif dns_action == "update" and dns_update_result is defined %}Updated{% elif dns_action == "delete" and dns_delete_result is defined %}Deleted{% else %}Failed{% endif %}

@@ -1,0 +1,46 @@
+---
+# This file mirrors automation/cloudflare-standards.yml so AWX jobs
+# can load the desired standardization profile directly from the project.
+# Update values here (or keep the two files in sync via automation).
+managed_domains: []
+standard_records:
+  core-web:
+    name: "www"
+    type: "A"
+    value: "203.0.113.10"
+    proxied: true
+    ttl: auto
+  api-endpoint:
+    name: "api"
+    type: "A"
+    value: "203.0.113.20"
+    proxied: false
+    ttl: auto
+  root-record:
+    name: "@"
+    type: "A"
+    value: "203.0.113.5"
+    proxied: false
+    ttl: auto
+standard_zone_settings:
+  always_use_https: "on"
+  ssl: "full"
+  security_level: "medium"
+  min_tls_version: "1.2"
+  opportunistic_encryption: "on"
+record_defaults:
+  ttl: auto
+  proxied: null
+platform_presets:
+  full:
+    description: "Clone all standard records"
+    record_keys:
+      - core-web
+      - api-endpoint
+      - root-record
+  web-only:
+    description: "Clone only customer-facing records"
+    record_keys:
+      - core-web
+platform_exclusions:
+  {}

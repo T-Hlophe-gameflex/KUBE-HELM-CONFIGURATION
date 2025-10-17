@@ -1,0 +1,169 @@
+---
+- name: Deploy AWX with Pre-configured Templates
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    awx_namespace: "{{ awx_namespace | default('awx') }}"
+    awx_admin_password: "{{ awx_admin_password | default('admin123') }}"
+    awx_admin_user: "{{ awx_admin_user | default('admin') }}"
+    awx_version: "{{ awx_version | default('23.5.1') }}"
+    setup_templates: "{{ setup_templates | default(true) }}"
+    cloudflare_api_token: "{{ cloudflare_api_token | default(lookup('env', 'CLOUDFLARE_API_TOKEN')) }}"
+    
+  tasks:
+    - name: Create AWX namespace
+      kubernetes.core.k8s:
+        name: "{{ awx_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+        
+    - name: Deploy AWX Operator
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: awx
+        src: https://raw.githubusercontent.com/ansible/awx-operator/2.7.2/deploy/awx-operator.yaml
+        
+    - name: Wait for AWX Operator to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: awx-operator-controller-manager
+        namespace: "{{ awx_namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+        
+    - name: Create AWX Admin Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: awx-admin-password
+            namespace: "{{ awx_namespace }}"
+          type: Opaque
+          stringData:
+            password: "{{ awx_admin_password }}"
+            
+    - name: Create Cloudflare Credentials Secret
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: cloudflare-credentials
+            namespace: "{{ awx_namespace }}"
+          type: Opaque
+          stringData:
+            api_token: "{{ cloudflare_api_token }}"
+      when: cloudflare_api_token != ""
+      
+    - name: Deploy AWX Instance
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: awx.ansible.com/v1beta1
+          kind: AWX
+          metadata:
+            name: awx
+            namespace: "{{ awx_namespace }}"
+          spec:
+            service_type: NodePort
+            nodeport_port: 30080
+            admin_user: "{{ awx_admin_user }}"
+            admin_password_secret: awx-admin-password
+            projects_persistence: true
+            projects_storage_size: 8Gi
+            postgres_storage_requirements:
+              requests:
+                storage: 8Gi
+            web_resource_requirements:
+              requests:
+                cpu: 1000m
+                memory: 2Gi
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+            task_resource_requirements:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: 1000m
+                memory: 2Gi
+                
+    - name: Wait for AWX to be ready
+      kubernetes.core.k8s_info:
+        api_version: awx.ansible.com/v1beta1
+        kind: AWX
+        name: awx
+        namespace: "{{ awx_namespace }}"
+        wait: true
+        wait_condition:
+          type: Running
+          status: "True"
+        wait_timeout: 600
+        
+    - name: Get AWX URL
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        name: awx-service
+        namespace: "{{ awx_namespace }}"
+      register: awx_service
+      
+    - name: Create AWX Job Templates ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: awx-job-templates
+            namespace: "{{ awx_namespace }}"
+          data:
+            cloudflare-standardize.yml: "{{ lookup('file', playbook_dir + '/cloudflare-standardize.yml') }}"
+            cloudflare-standards.yml: "{{ lookup('file', playbook_dir + '/cloudflare-standards.yml') }}"
+            job-templates.yml: "{{ lookup('file', playbook_dir + '/../helm-charts/charts/awx/config/job-templates.yml') }}"
+      when: setup_templates
+      
+    - name: Display AWX information
+      debug:
+        msg: |
+          🎉 AWX Deployment Complete!
+          ===========================
+          
+          📋 AWX Details:
+          Namespace: {{ awx_namespace }}
+          Admin User: {{ awx_admin_user }}
+          Admin Password: {{ awx_admin_password }}
+          
+          🌐 Access Information:
+          URL: http://localhost:30080 (after port-forward)
+          Port Forward Command: kubectl port-forward -n {{ awx_namespace }} svc/awx-service 30080:80
+          
+          📁 Job Templates:
+          ✅ Cloudflare Domain Operations (import from awx-job-templates ConfigMap)
+          ✅ Cloudflare Global Baseline
+          ✅ Cloudflare Platform Sync
+          ✅ Additional assets stored in ConfigMap: awx-job-templates
+          
+          🔧 Next Steps:
+          1. Port-forward AWX: kubectl port-forward -n {{ awx_namespace }} svc/awx-service 30080:80
+          2. Access AWX at: http://localhost:30080
+          3. Login with: {{ awx_admin_user }} / {{ awx_admin_password }}
+          4. Import job templates from ConfigMap
+          5. Associate Cloudflare credentials with each template
+          
+          💡 Tip: Use 'make awx-setup' to configure templates automatically

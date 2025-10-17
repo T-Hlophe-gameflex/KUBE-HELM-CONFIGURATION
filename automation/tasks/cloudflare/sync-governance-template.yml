@@ -1,0 +1,59 @@
+---
+- name: Lookup governance template metadata
+  uri:
+    url: "{{ awx_host_norm }}/api/v2/job_templates/?name={{ governance_template_name | urlencode }}"
+    method: GET
+    headers: "{{ awx_headers }}"
+    url_username: "{{ awx_use_token | ternary('', awx_username) }}"
+    url_password: "{{ awx_use_token | ternary('', awx_password) }}"
+    force_basic_auth: "{{ (not awx_use_token) | bool }}"
+    validate_certs: "{{ awx_verify_ssl | bool }}"
+  register: governance_template
+
+- name: Ensure template exists
+  assert:
+    that:
+      - governance_template.json.count | default(0) | int > 0
+    fail_msg: "AWX job template '{{ governance_template_name }}' was not found."
+
+- name: Fetch template survey spec
+  uri:
+    url: "{{ awx_host_norm }}/api/v2/job_templates/{{ governance_template.json.results[0].id }}/survey_spec/"
+    method: GET
+    headers: "{{ awx_headers }}"
+    url_username: "{{ awx_use_token | ternary('', awx_username) }}"
+    url_password: "{{ awx_use_token | ternary('', awx_password) }}"
+    force_basic_auth: "{{ (not awx_use_token) | bool }}"
+    validate_certs: "{{ awx_verify_ssl | bool }}"
+  register: governance_survey
+
+- name: Prepare updated survey specification
+  set_fact:
+    current_survey_spec: >-
+      {{
+        governance_survey.json
+        | combine({
+            'spec': [
+              question
+              | combine(survey_field_overrides.get(question.variable, {}))
+              for question in governance_survey.json.spec
+            ]
+          })
+      }}
+
+- name: Persist template survey updates
+  uri:
+    url: "{{ awx_host_norm }}/api/v2/job_templates/{{ governance_template.json.results[0].id }}/survey_spec/"
+    method: PUT
+    headers: "{{ awx_headers }}"
+    url_username: "{{ awx_use_token | ternary('', awx_username) }}"
+    url_password: "{{ awx_use_token | ternary('', awx_password) }}"
+    force_basic_auth: "{{ (not awx_use_token) | bool }}"
+    validate_certs: "{{ awx_verify_ssl | bool }}"
+    body_format: json
+    body: "{{ current_survey_spec }}"
+    status_code: 200
+
+- name: Track governance template update
+  set_fact:
+    governance_update_log: "{{ governance_update_log + [governance_template_name] }}"

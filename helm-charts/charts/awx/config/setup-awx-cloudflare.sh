@@ -1,189 +1,204 @@
 #!/bin/bash
 # AWX Configuration Script for Cloudflare DNS Management
-# This script sets up Job Templates, Surveys, and Projects in AWX
+# Creates or updates the Cloudflare governance job templates and surveys
 
-set -e
+set -euo pipefail
 
-# Configuration variables
 AWX_HOST="${AWX_HOST:-http://localhost:30080}"
 AWX_USERNAME="${AWX_USERNAME:-admin}"
 AWX_PASSWORD="${AWX_PASSWORD:-}"
+AWX_TOKEN="${AWX_TOKEN:-}"
+AWX_VERIFY_SSL="${AWX_VERIFY_SSL:-false}"
+ORGANIZATION="${ORGANIZATION:-Default}"
+PROJECT_NAME="${PROJECT_NAME:-Cloudflare DNS Project}"
 PROJECT_REPO="${PROJECT_REPO:-https://github.com/your-org/cloudflare-playbooks.git}"
+INVENTORY_NAME="${INVENTORY_NAME:-localhost}"
+HOST_NAME="${HOST_NAME:-localhost}"
+CREDENTIAL_NAME="${CREDENTIAL_NAME:-Cloudflare API Credentials}"
 
-# Colors for output
-RED='\033[0;31m'
+BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
+
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "${TMPDIR}"' EXIT
 
 log() {
     echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARN:${NC} $1"
+}
+
 success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
-warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+fatal() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1" >&2
+    exit 1
 }
 
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Check if AWX CLI is available
-check_awx_cli() {
-    if ! command -v awx &> /dev/null; then
-        error "AWX CLI not found. Please install it first:"
-        echo "pip install awxkit"
-        exit 1
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        fatal "Required command '$1' not found in PATH."
     fi
 }
 
-# Login to AWX
+setup_awx_env() {
+    export TOWER_HOST="${AWX_HOST}"
+    export TOWER_VERIFY_SSL="${AWX_VERIFY_SSL}"
+}
+
 login_awx() {
-    log "Logging into AWX at $AWX_HOST"
-    
-    if [ -z "$AWX_PASSWORD" ]; then
-        error "AWX_PASSWORD environment variable is required"
-        echo "Export your AWX admin password: export AWX_PASSWORD='your-password'"
-        exit 1
+    if [[ -n "${AWX_TOKEN}" ]]; then
+        export TOWER_OAUTH_TOKEN="${AWX_TOKEN}"
+        success "Using AWX token from environment."
+        return
     fi
-    
-    awx login "$AWX_HOST" --username "$AWX_USERNAME" --password "$AWX_PASSWORD"
-    success "Successfully logged into AWX"
+
+    if [[ -z "${AWX_PASSWORD}" ]]; then
+        fatal "AWX_PASSWORD or AWX_TOKEN must be provided."
+    fi
+
+    log "Generating AWX API token for ${AWX_USERNAME}@${AWX_HOST}..."
+    awx login -u "${AWX_USERNAME}" -p "${AWX_PASSWORD}" >/dev/null
+    if [[ ! -f "${HOME}/.awx_token" ]]; then
+        fatal "Failed to retrieve AWX token."
+    fi
+
+    AWX_TOKEN="$(<"${HOME}/.awx_token")"
+    export AWX_TOKEN
+    export TOWER_OAUTH_TOKEN="${AWX_TOKEN}"
+    success "AWX token stored in ~/.awx_token."
 }
 
-# Create Organization (if needed)
-create_organization() {
-    log "Creating organization..."
-    
-    awx organizations create \
-        --name "Cloudflare Operations" \
-        --description "Organization for Cloudflare DNS management" \
-        2>/dev/null || warning "Organization may already exist"
+awx_json() {
+    awx "$@" -f json
 }
 
-# Create Credential Type
-create_credential_type() {
-    log "Creating Cloudflare API credential type..."
-    
-    cat << 'EOF' > /tmp/cloudflare_credential_type.json
+get_id() {
+    local resource="$1"
+    local name="$2"
+    shift 2
+    awx "$resource" list --name "$name" "$@" -f json | python3 - "${name}" <<'PY'
+import json
+import sys
+name = sys.argv[1]
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(1)
+if data.get("count"):
+    print(data["results"][0]["id"])
+else:
+    print("")
+PY
+}
+
+ensure_organization() {
+    local org_id
+    org_id=$(get_id organizations "${ORGANIZATION}")
+    if [[ -z "${org_id}" ]]; then
+        log "Creating organization '${ORGANIZATION}'..."
+        awx organizations create --name "${ORGANIZATION}" >/dev/null
+        org_id=$(get_id organizations "${ORGANIZATION}")
+        success "Organization '${ORGANIZATION}' ready (id=${org_id})."
+    else
+        success "Organization '${ORGANIZATION}' present (id=${org_id})."
+    fi
+    echo "${org_id}"
+}
+
+ensure_project() {
+    local org_id="$1"
+    local project_id
+    project_id=$(get_id projects "${PROJECT_NAME}")
+    if [[ -z "${project_id}" ]]; then
+        log "Creating project '${PROJECT_NAME}'..."
+        awx projects create \
+            --name "${PROJECT_NAME}" \
+            --organization "${org_id}" \
+            --scm_type git \
+            --scm_url "${PROJECT_REPO}" >/dev/null
+        project_id=$(get_id projects "${PROJECT_NAME}")
+        success "Project '${PROJECT_NAME}' created (id=${project_id})."
+    else
+        log "Updating project '${PROJECT_NAME}' repo URL..."
+        awx projects modify "${project_id}" --scm_url "${PROJECT_REPO}" >/dev/null
+        success "Project '${PROJECT_NAME}' updated (id=${project_id})."
+    fi
+    echo "${project_id}"
+}
+
+ensure_inventory() {
+    local org_id="$1"
+    local inventory_id
+    inventory_id=$(get_id inventories "${INVENTORY_NAME}")
+    if [[ -z "${inventory_id}" ]]; then
+        log "Creating inventory '${INVENTORY_NAME}'..."
+        awx inventories create --name "${INVENTORY_NAME}" --organization "${org_id}" >/dev/null
+        inventory_id=$(get_id inventories "${INVENTORY_NAME}")
+        success "Inventory '${INVENTORY_NAME}' created (id=${inventory_id})."
+    else
+        success "Inventory '${INVENTORY_NAME}' present (id=${inventory_id})."
+    fi
+
+    local host_id
+    host_id=$(awx hosts list --name "${HOST_NAME}" --inventory "${inventory_id}" -f json | python3 - <<'PY'
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    print(data["results"][0]["id"] if data.get("count") else "")
+except json.JSONDecodeError:
+    print("")
+PY
+)
+    if [[ -z "${host_id}" ]]; then
+        log "Adding host '${HOST_NAME}' to inventory '${INVENTORY_NAME}'..."
+        awx hosts create --name "${HOST_NAME}" --inventory "${inventory_id}" \
+            --variables '{"ansible_connection": "local", "ansible_python_interpreter": "{{ ansible_playbook_python }}"}' >/dev/null
+        success "Host '${HOST_NAME}' added."
+    fi
+
+    echo "${inventory_id}"
+}
+
+lookup_credential_id() {
+    awx credentials list --name "${CREDENTIAL_NAME}" -f json | python3 - <<'PY'
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    print(data["results"][0]["id"] if data.get("count") else "")
+except json.JSONDecodeError:
+    print("")
+PY
+}
+
+write_survey() {
+    local path="$1"
+    local content="$2"
+    printf '%s\n' "$content" >"${path}"
+}
+
+survey_domain_spec() {
+cat <<'EOF'
 {
-  "name": "Cloudflare API",
-  "description": "Cloudflare API credentials",
-  "kind": "cloud",
-  "inputs": {
-    "fields": [
-      {
-        "id": "api_token",
-        "type": "string",
-        "label": "Cloudflare API Token",
-        "secret": true,
-        "help_text": "Cloudflare API Token with DNS:Edit permissions"
-      },
-      {
-        "id": "email", 
-        "type": "string",
-        "label": "Cloudflare Account Email",
-        "help_text": "Your Cloudflare account email (for legacy auth)"
-      },
-      {
-        "id": "global_api_key",
-        "type": "string", 
-        "label": "Cloudflare Global API Key",
-        "secret": true,
-        "help_text": "Cloudflare Global API Key (for legacy auth)"
-      }
-    ]
-  },
-  "injectors": {
-    "env": {
-      "CLOUDFLARE_API_TOKEN": "{{ api_token }}",
-      "CLOUDFLARE_EMAIL": "{{ email }}",
-      "CLOUDFLARE_API_KEY": "{{ global_api_key }}"
-    }
-  }
-}
-EOF
-
-    awx credential_types create \
-        --name "Cloudflare API" \
-        --inputs @/tmp/cloudflare_credential_type.json \
-        --injectors @/tmp/cloudflare_credential_type.json \
-        2>/dev/null || warning "Credential type may already exist"
-        
-    rm /tmp/cloudflare_credential_type.json
-}
-
-# Create Project
-create_project() {
-    log "Creating Cloudflare DNS project..."
-    
-    awx projects create \
-        --name "Cloudflare DNS Project" \
-        --description "Cloudflare DNS management playbooks" \
-        --scm_type "git" \
-        --scm_url "$PROJECT_REPO" \
-        --organization "Cloudflare Operations" \
-        2>/dev/null || warning "Project may already exist"
-}
-
-# Create Inventory
-create_inventory() {
-    log "Creating localhost inventory..."
-    
-    # Create inventory
-    awx inventories create \
-        --name "localhost" \
-        --description "Local execution inventory" \
-        --organization "Cloudflare Operations" \
-        2>/dev/null || warning "Inventory may already exist"
-    
-    # Add localhost host
-    awx hosts create \
-        --name "localhost" \
-        --inventory "localhost" \
-        --variables '{"ansible_connection": "local", "ansible_python_interpreter": "{{ ansible_playbook_python }}"}' \
-        2>/dev/null || warning "Host may already exist"
-}
-
-# Create Job Template with Survey
-create_job_template() {
-    log "Creating Cloudflare DNS Management job template..."
-    
-    # Create job template
-    awx job_templates create \
-        --name "Cloudflare DNS Management" \
-        --description "Dynamic Cloudflare DNS record management with survey support" \
-        --job_type "run" \
-        --inventory "localhost" \
-        --project "Cloudflare DNS Project" \
-        --playbook "cloudflare-dns-playbook.yml" \
-        --verbosity 2 \
-        --ask_variables_on_launch true \
-        --survey_enabled true \
-        2>/dev/null || warning "Job template may already exist"
-    
-    # Create survey
-    log "Creating survey for job template..."
-    
-    cat << 'EOF' > /tmp/survey_spec.json
-{
-  "name": "Cloudflare DNS Management Survey",
-  "description": "Configure DNS operations for Cloudflare domains",
+  "name": "Domain Operations Survey",
+  "description": "Select a domain, review the standard defaults, and capture DNS record details.",
   "spec": [
     {
-      "question_name": "Domain Selection",
-      "question_description": "Select the domain to manage",
+      "question_name": "Domain",
+      "question_description": "Domain to manage. Updated dynamically by the survey sync utility.",
       "required": true,
       "type": "multiplechoice",
       "variable": "survey_domain",
       "choices": [
         "example.com",
-        "test-domain.com", 
+        "test-domain.com",
         "dev.example.com",
         "staging.example.com",
         "prod.example.com"
@@ -191,36 +206,21 @@ create_job_template() {
       "default": "example.com"
     },
     {
-      "question_name": "DNS Operation",
-      "question_description": "Select the operation to perform",
-      "required": true,
-      "type": "multiplechoice",
-      "variable": "survey_operation",
-      "choices": [
-        "create",
-        "update", 
-        "delete",
-        "bulk_create",
-        "list"
-      ],
-      "default": "create"
-    },
-    {
       "question_name": "Record Name",
-      "question_description": "DNS record name (without domain)",
+      "question_description": "Record host label (use '@' for the apex).",
       "required": true,
       "type": "text",
-      "variable": "survey_record_name",
+      "variable": "record_name",
       "default": "www",
       "min": 1,
       "max": 63
     },
     {
       "question_name": "Record Type",
-      "question_description": "DNS record type",
+      "question_description": "DNS record type to create or update.",
       "required": true,
       "type": "multiplechoice",
-      "variable": "survey_record_type",
+      "variable": "record_type",
       "choices": [
         "A",
         "AAAA",
@@ -228,77 +228,232 @@ create_job_template() {
         "MX",
         "TXT",
         "SRV",
-        "CAA"
+        "CAA",
+        "NS"
       ],
       "default": "A"
     },
     {
       "question_name": "Record Value",
-      "question_description": "DNS record value (IP, hostname, or text)",
+      "question_description": "Target IP, hostname, or text content for the record.",
       "required": true,
       "type": "text",
-      "variable": "survey_record_value",
-      "default": "192.168.1.100",
-      "min": 1,
-      "max": 255
+      "variable": "record_value",
+      "default": ""
     },
     {
-      "question_name": "TTL (Time To Live)",
-      "question_description": "DNS record TTL in seconds",
+      "question_name": "Record Comment",
+      "question_description": "Optional comment to store with the record (max 100 characters).",
       "required": false,
+      "type": "text",
+      "variable": "record_comment",
+      "default": "",
+      "max": 100
+    },
+    {
+      "question_name": "Record Tags",
+      "question_description": "Optional comma-separated tags to attach to the record.",
+      "required": false,
+      "type": "text",
+      "variable": "record_tags",
+      "default": ""
+    },
+    {
+      "question_name": "TTL",
+      "question_description": "Time-to-live in seconds. 'auto' maps to Cloudflare's automatic TTL (300s).",
+      "required": true,
       "type": "multiplechoice",
-      "variable": "survey_record_ttl",
+      "variable": "record_ttl",
       "choices": [
+        "auto",
+        "60",
+        "120",
         "300",
-        "1800",
+        "600",
         "3600",
         "7200",
-        "14400",
-        "28800",
+        "18000",
+        "43200",
         "86400"
       ],
-      "default": "300"
+      "default": "auto"
     },
     {
-      "question_name": "Cloudflare Proxy",
-      "question_description": "Enable Cloudflare proxy (orange cloud)",
-      "required": false,
+      "question_name": "Proxy Status",
+      "question_description": "Whether Cloudflare should proxy this record.",
+      "required": true,
       "type": "multiplechoice",
-      "variable": "survey_record_proxied",
+      "variable": "record_proxied",
       "choices": [
-        "false",
-        "true"
+        "true",
+        "false"
       ],
-      "default": "false"
+      "default": "true"
+    },
+    {
+      "question_name": "Apply Standard Zone Settings",
+      "question_description": "Also enforce standardized zone settings for the selected domain after record changes.",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "enforce_domain_standards",
+      "choices": [
+        "true",
+        "false"
+      ],
+      "default": "true"
+    },
+    {
+      "question_name": "Standards Profile",
+      "question_description": "Path inside the project for the standards definition file.",
+      "required": false,
+      "type": "text",
+      "variable": "standards_file",
+      "default": "automation/cloudflare-standards.yml"
     }
   ]
 }
 EOF
-
-    awx job_templates modify "Cloudflare DNS Management" \
-        --survey_spec @/tmp/survey_spec.json \
-        2>/dev/null || warning "Survey may already exist"
-        
-    rm /tmp/survey_spec.json
 }
 
-# Create Zone Info Job Template
-create_zone_info_template() {
-    log "Creating Cloudflare Zone Info job template..."
-    
-    awx job_templates create \
-        --name "Cloudflare Zone Info" \
-        --description "Get Cloudflare zone information and DNS records" \
-        --job_type "run" \
-        --inventory "localhost" \
-        --project "Cloudflare DNS Project" \
-        --playbook "cloudflare-zone-info.yml" \
-        --verbosity 1 \
-        --survey_enabled true \
-        2>/dev/null || warning "Job template may already exist"
-    
-    # Simple survey for domain selection
-    cat << 'EOF' > /tmp/zone_survey.json
+survey_global_spec() {
+cat <<'EOF'
+{
+  "name": "Global Baseline Survey",
+  "description": "Select domains and confirm global record standards to enforce.",
+  "spec": [
+    {
+      "question_name": "Target Domains",
+      "question_description": "Domains to normalize. Leave empty to include all managed domains from the standards profile.",
+      "required": false,
+      "type": "multiselect",
+      "variable": "target_domains",
+      "choices": [
+        "example.com",
+        "test-domain.com",
+        "dev.example.com",
+        "staging.example.com",
+        "prod.example.com"
+      ],
+      "default": ""
+    },
+    {
+      "question_name": "Enforce TTL",
+      "question_description": "Override defaults for the run. 'auto' converts to Cloudflare's automatic TTL.",
+      "required": false,
+      "type": "multiplechoice",
+      "variable": "global_record_ttl",
+      "choices": [
+        "",
+        "auto",
+        "60",
+        "120",
+        "300",
+        "600",
+        "3600",
+        "7200",
+        "18000",
+        "43200",
+        "86400"
+      ],
+      "default": ""
+    },
+    {
+      "question_name": "Enforce Proxy Status",
+      "question_description": "Leave blank to keep standards file defaults.",
+      "required": false,
+      "type": "multiplechoice",
+      "variable": "global_record_proxied",
+      "choices": [
+        "",
+        "true",
+        "false"
+      ],
+      "default": ""
+    },
+    {
+      "question_name": "Standards Profile",
+      "question_description": "Path inside the project for the standards definition file.",
+      "required": false,
+      "type": "text",
+      "variable": "standards_file",
+      "default": "automation/cloudflare-standards.yml"
+    }
+  ]
+}
+EOF
+}
+
+survey_platform_spec() {
+cat <<'EOF'
+{
+  "name": "Platform Sync Survey",
+  "description": "Choose template and target domains, then select the preset or record keys to synchronize.",
+  "spec": [
+    {
+      "question_name": "Template Domain",
+      "question_description": "Source domain for the record clone operation.",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "template_domain",
+      "choices": [
+        "example.com",
+        "test-domain.com",
+        "dev.example.com",
+        "staging.example.com",
+        "prod.example.com"
+      ],
+      "default": "example.com"
+    },
+    {
+      "question_name": "Target Domains",
+      "question_description": "Domains that should receive the records.",
+      "required": true,
+      "type": "multiselect",
+      "variable": "target_domains",
+      "choices": [
+        "example.com",
+        "test-domain.com",
+        "dev.example.com",
+        "staging.example.com",
+        "prod.example.com"
+      ],
+      "default": ""
+    },
+    {
+      "question_name": "Platform Preset",
+      "question_description": "Preset from the standards file describing which record keys to sync.",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "platform_preset",
+      "choices": [
+        "full",
+        "web-only"
+      ],
+      "default": "full"
+    },
+    {
+      "question_name": "Record Keys Override",
+      "question_description": "Optional comma-separated list of record keys to sync instead of the preset.",
+      "required": false,
+      "type": "text",
+      "variable": "record_keys",
+      "default": ""
+    },
+    {
+      "question_name": "Standards Profile",
+      "question_description": "Path inside the project for the standards definition file.",
+      "required": false,
+      "type": "text",
+      "variable": "standards_file",
+      "default": "automation/cloudflare-standards.yml"
+    }
+  ]
+}
+EOF
+}
+
+survey_zone_info_spec() {
+cat <<'EOF'
 {
   "name": "Zone Information Survey",
   "description": "Select domain to inspect",
@@ -321,37 +476,133 @@ create_zone_info_template() {
   ]
 }
 EOF
-
-    awx job_templates modify "Cloudflare Zone Info" \
-        --survey_spec @/tmp/zone_survey.json \
-        2>/dev/null || warning "Survey may already exist"
-        
-    rm /tmp/zone_survey.json
 }
 
-# Main execution
+ensure_job_template() {
+    local name="$1"
+    local description="$2"
+    local playbook="$3"
+    local extra_vars="$4"
+    local survey_json="$5"
+    local project_id="$6"
+    local inventory_id="$7"
+    local credential_id="$8"
+
+    local template_id
+    template_id=$(get_id job_templates "${name}")
+
+    if [[ -z "${template_id}" ]]; then
+        log "Creating job template '${name}'..."
+        local create_cmd=(awx job_templates create
+            --name "${name}"
+            --description "${description}"
+            --job_type run
+            --inventory "${inventory_id}"
+            --project "${project_id}"
+            --playbook "${playbook}"
+            --verbosity 1
+            --ask_variables_on_launch true
+            --survey_enabled true
+            --extra_vars "${extra_vars}")
+        if [[ -n "${credential_id}" ]]; then
+            create_cmd+=(--credential "${credential_id}")
+        fi
+        if ! "${create_cmd[@]}" >/dev/null 2>&1; then
+            warn "Template '${name}' already exists; proceeding to update."
+        else
+            success "Template '${name}' created."
+        fi
+        template_id=$(get_id job_templates "${name}")
+    fi
+
+    log "Updating job template '${name}' settings..."
+    local modify_cmd=(awx job_templates modify "${template_id}"
+        --description "${description}"
+        --job_type run
+        --inventory "${inventory_id}"
+        --project "${project_id}"
+        --playbook "${playbook}"
+        --verbosity 1
+        --ask_variables_on_launch true
+        --survey_enabled true
+        --extra_vars "${extra_vars}")
+    if [[ -n "${credential_id}" ]]; then
+        modify_cmd+=(--credential "${credential_id}")
+    fi
+    "${modify_cmd[@]}" >/dev/null
+
+    local survey_file="${TMPDIR}/survey-$(echo "${name}" | tr ' ' '-')".json
+    write_survey "${survey_file}" "${survey_json}"
+    awx job_templates survey_spec "${template_id}" --set @"${survey_file}" >/dev/null
+    success "Survey for '${name}' applied."
+}
+
 main() {
-    log "Starting AWX configuration for Cloudflare DNS Management"
-    
-    check_awx_cli
+    log "Starting AWX configuration for Cloudflare governance workflows"
+
+    require_cmd awx
+    require_cmd python3
+
+    setup_awx_env
     login_awx
-    create_organization
-    create_credential_type
-    create_project
-    create_inventory
-    create_job_template
-    create_zone_info_template
-    
-    success "AWX configuration completed successfully!"
+
+    local org_id project_id inventory_id credential_id
+    org_id=$(ensure_organization)
+    project_id=$(ensure_project "${org_id}")
+    inventory_id=$(ensure_inventory "${org_id}")
+    credential_id=$(lookup_credential_id)
+    if [[ -z "${credential_id}" ]]; then
+        warn "Credential '${CREDENTIAL_NAME}' not found. Templates will be created without a default credential."
+    else
+        success "Using credential '${CREDENTIAL_NAME}' (id=${credential_id})."
+    fi
+
+    ensure_job_template \
+        "Cloudflare Domain Operations" \
+        "Manage domain-level DNS records with standards-aware defaults" \
+        "automation/cloudflare-standardize.yml" \
+        '{"workflow":"manage_record","enforce_domain_standards":true}' \
+        "$(survey_domain_spec)" \
+        "${project_id}" \
+        "${inventory_id}" \
+        "${credential_id}"
+
+    ensure_job_template \
+        "Cloudflare Global Baseline" \
+        "Normalize TTL and proxy posture across managed domains" \
+        "automation/cloudflare-standardize.yml" \
+        '{"workflow":"global_standardize"}' \
+        "$(survey_global_spec)" \
+        "${project_id}" \
+        "${inventory_id}" \
+        "${credential_id}"
+
+    ensure_job_template \
+        "Cloudflare Platform Sync" \
+        "Clone standard record presets from a template domain into peers" \
+        "automation/cloudflare-standardize.yml" \
+        '{"workflow":"platform_sync"}' \
+        "$(survey_platform_spec)" \
+        "${project_id}" \
+        "${inventory_id}" \
+        "${credential_id}"
+
+    ensure_job_template \
+        "Cloudflare Zone Info" \
+        "Get Cloudflare zone information and DNS records" \
+        "cloudflare-zone-info.yml" \
+        '{}' \
+        "$(survey_zone_info_spec)" \
+        "${project_id}" \
+        "${inventory_id}" \
+        "${credential_id}"
+
+    success "AWX configuration completed successfully."
     echo
     echo "Next steps:"
-    echo "1. Create a Cloudflare API credential in AWX with your API token"
-    echo "2. Associate the credential with your job templates"
-    echo "3. Update the domain choices in the surveys to match your domains"
-    echo "4. Run the job templates to manage your DNS records"
+    echo "  1. Verify the Cloudflare API credential '${CREDENTIAL_NAME}' exists or create it and re-run if necessary."
+    echo "  2. Run automation/cloudflare-sync-survey.yml to refresh live domain choices."
+    echo "  3. Launch the job template that matches your workflow (Domain Operations, Global Baseline, Platform Sync)."
 }
 
-# Check if script is being sourced or executed
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+main "$@"

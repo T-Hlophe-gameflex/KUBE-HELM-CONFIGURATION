@@ -1,0 +1,67 @@
+{% set results = [] %}
+{% set ttl_auto = ttl_auto_value %}
+{% set ttl_override_raw = (global_record_ttl | default('')) %}
+{% set prox_override_raw = (global_record_proxied | default('')) %}
+{% set ttl_override = ttl_override_raw | string | trim %}
+{% set prox_override = prox_override_raw | string | trim %}
+{% set ttl_override_active = ttl_override != '' %}
+{% set prox_override_active = prox_override != '' %}
+{% set prox_override_bool = none %}
+{% if prox_override_active %}
+  {% set prox_lower = prox_override | lower %}
+  {% if prox_lower in ['true', '1', 'yes', 'on'] %}
+    {% set prox_override_bool = true %}
+  {% elif prox_lower in ['false', '0', 'no', 'off'] %}
+    {% set prox_override_bool = false %}
+  {% endif %}
+{% endif %}
+{% for domain, records in domain_records.items() %}
+  {% for record in records %}
+    {% set default_ttl = ttl_auto %}
+    {% if record_defaults.ttl is not none %}
+      {% if record_defaults.ttl == 'auto' %}
+        {% set default_ttl = ttl_auto %}
+      {% else %}
+        {% set default_ttl = record_defaults.ttl | int %}
+      {% endif %}
+    {% endif %}
+    {% set desired_ttl = default_ttl %}
+    {% if ttl_override_active %}
+      {% if ttl_override == 'auto' %}
+        {% set desired_ttl = ttl_auto %}
+      {% else %}
+        {% set desired_ttl = ttl_override | int %}
+      {% endif %}
+    {% endif %}
+    {% set enforce_ttl = ttl_override_active or (record_defaults.ttl is not none) %}
+    {% set mismatch_ttl = enforce_ttl and record.ttl != desired_ttl %}
+
+    {% if prox_override_bool is not none %}
+      {% set enforce_proxied = true %}
+      {% set desired_proxied = prox_override_bool %}
+    {% else %}
+      {% set enforce_proxied = record_defaults.proxied is not none %}
+      {% set desired_proxied = record_defaults.proxied %}
+    {% endif %}
+
+    {% if desired_proxied is not none and desired_proxied not in [true, false] %}
+      {% set desired_proxied = (desired_proxied | string | lower) in ['true', '1', 'yes', 'on'] %}
+    {% endif %}
+    {% set mismatch_proxied = enforce_proxied and record.proxied != desired_proxied %}
+
+    {% if mismatch_ttl or mismatch_proxied %}
+      {% set _ = results.append({
+        'domain': domain,
+        'record_id': record.id,
+        'name': record.name,
+        'type': record.type,
+        'content': record.content,
+        'current_ttl': record.ttl,
+        'current_proxied': record.proxied,
+        'desired_ttl': desired_ttl,
+        'desired_proxied': desired_proxied
+      }) %}
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+{{ results | to_nice_yaml }}
