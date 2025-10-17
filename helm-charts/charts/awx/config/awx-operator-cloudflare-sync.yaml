@@ -1,0 +1,70 @@
+# AWX Operator manifests for Cloudflare domain sync automation
+# Namespace: awx
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXProject
+metadata:
+  name: cloudflare-dns-project
+  namespace: awx
+spec:
+  name: Cloudflare DNS Project
+  scm_type: git
+  scm_url: https://github.com/T-Hlophe-gameflex/KUBE-HELM-CONFIGURATION.git
+  organization: Default
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token
+  namespace: awx
+stringData:
+  api_token: "j6NsfyFG-EsBTDxnZCdsiEy8QAdyliiJgxdz4n7x"
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXCredential
+metadata:
+  name: cloudflare-api-credential
+  namespace: awx
+spec:
+  name: Cloudflare API Credentials
+  credential_type: Cloud
+  organization: Default
+  inputs:
+    api_token: "{{ lookup('k8s', 'secret', 'cloudflare-api-token', 'awx')['api_token'] }}"
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXInventory
+metadata:
+  name: localhost-inventory
+  namespace: awx
+spec:
+  name: localhost
+  organization: Default
+  hosts:
+    - name: localhost
+      variables: |
+        ansible_connection: local
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXJobTemplate
+metadata:
+  name: cloudflare-domain-sync
+  namespace: awx
+spec:
+  name: Cloudflare Domain Sync
+  project: cloudflare-dns-project
+  playbook: helm-charts/charts/awx/config/sync-cloudflare-domains.yml
+  inventory: localhost-inventory
+  credentials:
+    - cloudflare-api-credential
+  ask_variables_on_launch: false
+  survey_enabled: false
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXSchedule
+metadata:
+  name: cloudflare-domain-sync-daily
+  namespace: awx
+spec:
+  unified_job_template: cloudflare-domain-sync
+  rrule: "DTSTART;TZID=UTC:20251017T020000 RRULE:FREQ=DAILY"
