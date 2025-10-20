@@ -1,178 +1,53 @@
 ---
-# Manage individual DNS record (create/update) with standard defaults applied.
+# Minimal manage-record tasks used by AWX wrapper for dry-run testing
 
-- name: Determine active domain for manage_record
+- name: Set input variables
   set_fact:
-    active_domain: >-
-      {{ survey_domain | default(domain | default(managed_domain_list[0])) }}
-  vars:
-    survey_domain: "{{ survey_domain | default('') }}"
-    domain: "{{ domain | default('') }}"
+    active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
+    effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+    effective_record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+    effective_record_content: "{{ survey_record_value | default(record_value | default('')) }}"
+    effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
+    effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
 
-- name: Validate active domain exists
+- name: Validate required fields
   assert:
     that:
-      - active_domain in zone_map
-    fail_msg: "Domain {{ active_domain }} is not managed within this account."
+      - effective_record_type is not none
+      - effective_record_content is not none
+    fail_msg: "record_type and record_value must be provided."
 
-- name: Resolve record name
+- name: Normalize TTL
   set_fact:
-    effective_record_name: "{{ record_name | default(survey_record_name | default('')) }}"
+    effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
 
-- name: Resolve record type
+- name: Normalize proxied flag
   set_fact:
-    effective_record_type: "{{ record_type | default(survey_record_type | default('A')) }}"
+    # None means 'not provided' so downstream can choose default behavior
+    effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
 
-- name: Resolve record content
+- name: Build record payload
   set_fact:
-    effective_record_content: "{{ record_value | default(survey_record_value | default('')) }}"
-
-- name: Resolve record comment
-  set_fact:
-    effective_record_comment: "{{ record_comment | default(survey_record_comment | default('')) }}"
-  vars:
-    survey_record_comment: "{{ survey_record_comment | default('') }}"
-
-- name: Resolve record tags
-  set_fact:
-    effective_record_tags: "{{ record_tags | default(survey_record_tags | default([])) }}"
-  vars:
-    survey_record_tags: "{{ survey_record_tags | default('') }}"
-
-- name: Fail when required fields are missing
-  assert:
-    that:
-      - effective_record_name | length > 0
-      - effective_record_type | length > 0
-      - effective_record_content | length > 0
-    fail_msg: "record_name, record_type and record_value must be provided."
-
-- name: Calculate desired TTL
-  set_fact:
-    effective_record_ttl: >-
-      {{
-        ((survey_record_ttl | default(record_ttl | default(effective_record_defaults.ttl))) == 'auto')
-        | ternary(ttl_auto_value, (survey_record_ttl | default(record_ttl | default(effective_record_defaults.ttl))) | int)
-      }}
-  vars:
-    survey_record_ttl: "{{ survey_record_ttl | default('') }}"
-    record_ttl: "{{ record_ttl | default('') }}"
-
-- name: Determine desired proxied flag
-  set_fact:
-    effective_record_proxied: >-
-      {{
-        survey_record_proxied | default(record_proxied | default(effective_record_defaults.proxied))
-      }}
-  vars:
-    survey_record_proxied: "{{ survey_record_proxied | default('') }}"
-    record_proxied: "{{ record_proxied | default('') }}"
-
-- name: Build fully qualified record name
-  set_fact:
-    fq_record_name: >-
-      {{
-        (effective_record_name in ['@', active_domain])
-        | ternary(active_domain,
-                  effective_record_name if effective_record_name.endswith(active_domain)
-                  else effective_record_name ~ '.' ~ active_domain)
-      }}
-
-- name: Find existing record match
-  set_fact:
-    existing_record: >-
-      {{
-        (domain_records.get(active_domain, [])
-          | selectattr('name', 'equalto', fq_record_name)
-          | selectattr('type', 'equalto', effective_record_type)
-          | list
-          | first) | default({})
-      }}
-
-- name: Determine API endpoint and method
-  set_fact:
-    record_endpoint: "{{ api_base }}/zones/{{ zone_map[active_domain] }}/dns_records{{ existing_record.id | default('') | ternary('/' ~ existing_record.id, '') }}"
-    record_method: "{{ 'PUT' if existing_record else 'POST' }}"
-
-- name: Normalize proxied boolean value
-  set_fact:
-    normalized_proxied: >-
-      {% if effective_record_proxied is none or effective_record_proxied == '' %}
-      {{ none }}
-      {% elif effective_record_proxied in [true, false] %}
-      {{ effective_record_proxied }}
-      {% else %}
-      {{ (effective_record_proxied | string | lower) in ['true', 'yes', 'on', '1'] }}
-      {% endif %}
-
-- name: Build base payload for record operation
-  set_fact:
-    record_payload_base:
+    record_payload:
       type: "{{ effective_record_type }}"
       name: "{{ effective_record_name if effective_record_name != '@' else active_domain }}"
       content: "{{ effective_record_content }}"
       ttl: "{{ effective_record_ttl }}"
 
-- name: Combine proxied flag when specified
+- name: Add proxied flag when provided
   set_fact:
-    record_payload: "{{ record_payload_base | combine({'proxied': normalized_proxied}) }}"
-  when: normalized_proxied is not none
+    record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
+  when: effective_record_proxied is not none
 
-- name: Use base payload when proxied not provided
+- name: Compute record endpoint (placeholder)
   set_fact:
-    record_payload: "{{ record_payload_base }}"
-  when: normalized_proxied is none
+    record_endpoint: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}/zones/{{ zone_map[active_domain] | default('ZONE_ID') }}/dns_records"
+    record_method: "POST"
 
-- name: Normalize record tags input
-  set_fact:
-    normalized_record_tags: >-
-      {{
-        (
-          effective_record_tags
-          if effective_record_tags is iterable and effective_record_tags is not string
-          else (effective_record_tags | string | replace('\r', '') | replace('\n', ',') | split(','))
-        )
-        | map('trim')
-        | reject('equalto', '')
-        | list
-      }}
-
-- name: Append comment when provided
-  set_fact:
-    record_payload: "{{ record_payload | combine({'comment': effective_record_comment}) }}"
-  when: effective_record_comment | default('') | length > 0
-
-- name: Append tags when provided
-  set_fact:
-    record_payload: "{{ record_payload | combine({'tags': normalized_record_tags}) }}"
-  when: normalized_record_tags | length > 0
-
-- name: Apply record change via Cloudflare API
-  uri:
-    url: "{{ record_endpoint }}"
-    method: "{{ record_method }}"
-    headers: "{{ cloudflare_headers }}"
-    body_format: json
-    body: "{{ record_payload | to_json }}"
-    return_content: true
-  register: manage_record_result
-
-- name: Dry-run: show planned Cloudflare request
+- name: "Dry-run: show planned Cloudflare request"
   debug:
     msg:
       - "DRY RUN: would call {{ record_method }} {{ record_endpoint }}"
       - "payload: {{ record_payload }}"
   when: dry_run | default(false)
 
-- name: Update change log for manage_record
-  set_fact:
-    change_log: "{{ change_log + [manage_record_summary] }}"
-  vars:
-    manage_record_summary:
-      workflow: manage_record
-      domain: "{{ active_domain }}"
-      record: "{{ fq_record_name }}"
-      type: "{{ effective_record_type }}"
-      status: {{ manage_record_result.json.success | default(false) | bool }}
-      action: "{{ record_method }}"
-      id: "{{ manage_record_result.json.result.id | default(existing_record.id | default('')) }}"

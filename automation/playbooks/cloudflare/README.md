@@ -1,5 +1,4 @@
-Cloudflare AWX playbooks
-========================
+# Cloudflare AWX playbooks
 
 Overview
 --------
@@ -21,15 +20,34 @@ How to add domains to the dropdown
 ----------------------------------
 AWX Surveys accept the choices field as a pipe-separated list. Example choices string:
 
-"example.com|example.org|sub.example.com"
+```
+example.com|example.org|sub.example.com
+```
 
 Use the AWX web UI or the API endpoint `/api/v2/job_templates/<id>/survey_spec/` to set the survey spec for each template.
 
 Automating surveys via AWX API
 ------------------------------
-You can POST a JSON survey spec to `/api/v2/job_templates/<id>/survey_spec/` to create/update the survey. See the repository root README for an example.
+You can POST a JSON survey spec to `/api/v2/job_templates/<id>/survey_spec/` to create/update the survey programmatically. See the repository root README for an example.
 
 Notes
 -----
 - Ensure the AWX Job Template has the Cloudflare credential attached (this repo previously created one named "Cloudflare API Credentials").
 - The playbooks will read survey variables and fall back to defaults defined in the task files if not provided.
+
+Example: sample launch payload for AWX API (extra_vars only)
+
+```
+{
+  "extra_vars": {
+    "dry_run": true,
+    "survey_domain": "example.com",
+    "survey_action": "create",
+    "survey_record_name": "www",
+    "survey_record_type": "A",
+    "survey_record_value": "1.2.3.4",
+    "survey_record_ttl": "3600",
+    "survey_record_proxied": false
+  }
+}
+```
