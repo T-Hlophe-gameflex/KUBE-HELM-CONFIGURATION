@@ -22,13 +22,15 @@ awx:
   settings:
     debugMode: false
     logLevel: INFO
+  # Storage access mode for projects
+  projectsStorageAccessMode: ReadWriteOnce
 
 # PostgreSQL configuration
 postgres:
   # Storage configuration
   storage:
     # Storage class for PostgreSQL persistent volume
-    storageClass: local-storage
+    storageClass: local-path
     # Size of the persistent volume
     size: 5Gi
     # Access modes for the persistent volume
