@@ -1,3 +1,17 @@
+# KUBE-HELM-CONFIGURATION
+
+## Cloudflare automation (AWX)
+
+This repository contains Ansible playbooks and AWX job templates used to manage Cloudflare DNS records and related tasks.
+
+Quick notes:
+- AWX project: Cloudflare-DNS-project (created in AWX during automation)
+- Job templates: Cloudflare-manage-record, Cloudflare-domain-standardize, Cloudflare-global-standardize, Cloudflare-platform-sync, Cloudflare-sync-governance-template
+- Surveys: Job templates can be configured with AWX "Surveys" to present interactive fields (domain dropdown, action, record name, value, TTL, proxied). See automation/playbooks/cloudflare/README.md for details on survey variables and how to add domains.
+
+If you want AWX to present a dropdown of managed domains, update the job template surveys in AWX (or using the AWX API) with the choices string (pipe-separated list). Example choices: "example.com|example.org|sub.example.com".
+
+To update the project in AWX after making changes in this repo, push changes to the `main` branch and trigger a Project Update in AWX (or use the AWX API: POST /api/v2/projects/<id>/update/).
 # 🚀 Kubernetes Infrastructure Automation Platform
 
 > **Complete automation framework for deploying ELK stack, application services, and Cloudflare DNS management**
