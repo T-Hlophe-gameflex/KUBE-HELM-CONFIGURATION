@@ -32,10 +32,14 @@ if [ -z "$INVENTORY_ID" ] || [ -z "$PROJECT_ID" ] || [ -z "$CRED_ID" ]; then
   exit 1
 fi
 
+# Set this to the playbook path prefix relative to your AWX project root
+PLAYBOOK_PATH_PREFIX=""
+# If your AWX project root is the repo root, use: PLAYBOOK_PATH_PREFIX="automation/tasks/cloudflare/"
+# If your AWX project root is automation/tasks/cloudflare, use: PLAYBOOK_PATH_PREFIX=""
+
 declare -A MAP
 MAP["platform-dns-template.yml"]="platform-sync.yml"
 MAP["global-dns-template.yml"]="global-standardize.yml"
-MAP["domain-dns-template.yml"]="domain-standardize.yml"
 
 for name in "${!MAP[@]}"; do
   pb_basename=${MAP[$name]}
@@ -47,7 +51,7 @@ for name in "${!MAP[@]}"; do
   else
     echo "Creating job template '$name'..."
     CREATE=$(curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X POST "$AWX_HOST/api/v2/job_templates/" \
-      -d "{\"name\":\"$name\",\"job_type\":\"run\",\"inventory\":$INVENTORY_ID,\"project\":$PROJECT_ID,\"playbook\":\"automation/tasks/cloudflare/$pb_basename\",\"credential\":$CRED_ID}")
+      -d "{\"name\":\"$name\",\"job_type\":\"run\",\"inventory\":$INVENTORY_ID,\"project\":$PROJECT_ID,\"playbook\":\"${PLAYBOOK_PATH_PREFIX}$pb_basename\",\"credential\":$CRED_ID}")
     ID=$(python3 -c 'import sys,json;j=json.load(sys.stdin);print(j.get("id",""))' <<< "$CREATE")
     echo "Create response: $CREATE"
   fi
