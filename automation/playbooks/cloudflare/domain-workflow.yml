@@ -1,0 +1,20 @@
+---
+- hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Map survey variables -> playbook variables
+      set_fact:
+        domain: "{{ survey_domain | default(domain | default('')) }}"
+        action: "{{ survey_action | default(action | default('')) }}"
+        source_zone: "{{ survey_source_zone | default(source_zone | default('')) }}"
+        source_record_choice: "{{ survey_record_choice | default(source_record_choice | default('')) }}"
+        record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+        record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+        record_value: "{{ survey_record_value | default(record_value | default('')) }}"
+        record_ttl: "{{ survey_record_ttl | default(record_ttl | default('3600')) }}"
+        record_proxied: "{{ survey_record_proxied | default(record_proxied | default('false')) }}"
+        dry_run: "{{ dry_run | default('true') }}"
+
+    - name: Include domain manage tasks
+      include_tasks: ../../tasks/cloudflare/domain/manage-record.yml
