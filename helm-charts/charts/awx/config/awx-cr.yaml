@@ -1,0 +1,16 @@
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx
+  namespace: awx
+spec:
+  service_type: ClusterIP
+  ingress_type: none
+  hostname: awx.local
+  admin_user: admin
+  admin_password_secret: awx-admin-password
+  postgres_storage_class: standard
+  projects_persistence: true
+  projects_storage_class: standard
+  projects_existing_claim: ""
+  replicas: 1

@@ -1,0 +1,43 @@
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXCredential
+metadata:
+  name: cloudflare-api-token
+spec:
+  organization: Default
+  credential_type: "Machine"
+  inputs:
+    username: "api"
+    password: "{{ vault.cloudflare_api_token }}"
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXProject
+metadata:
+  name: cloudflare-sync-project
+spec:
+  organization: Default
+  scm_type: git
+  scm_url: "https://your.git.repo/with/sync-playbook.git"
+  scm_branch: main
+  scm_clean: true
+  scm_update_on_launch: true
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXJobTemplate
+metadata:
+  name: cloudflare-sync-job
+spec:
+  project: cloudflare-sync-project
+  playbook: ../../../../automation/cloudflare-list-zones.yml
+  inventory: Default
+  credentials:
+    - cloudflare-api-token
+  job_type: run
+  ask_variables_on_launch: true
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXSchedule
+metadata:
+  name: cloudflare-sync-schedule
+spec:
+  unified_job_template: cloudflare-sync-job
+  rrule: "DTSTART;TZID=UTC:20251020T000000 RRULE:FREQ=HOURLY;INTERVAL=1"
