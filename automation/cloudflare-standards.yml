@@ -2,7 +2,7 @@
 # Cloudflare standardization profile
 # Customize these values to define the desired state for your account.
 # The playbooks will load this file by default.
-
+ 
 # List of domains you want to manage. If empty, all domains in the account are used.
 managed_domains: []
 

@@ -76,7 +76,7 @@
       set_fact:
         zone_id: "{{ zone_info.json.result[0].id }}"
       when: zone_info.json.result | length > 0
-
+ 
   tasks:
     - name: Display current configuration
       debug:

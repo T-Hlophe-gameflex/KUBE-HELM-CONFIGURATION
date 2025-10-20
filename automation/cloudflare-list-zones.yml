@@ -14,7 +14,7 @@
           Content-Type: "application/json"
         return_content: yes
       register: cloudflare_zones_response
-
+ 
     - name: Show all Cloudflare zones
       debug:
         msg: "Zone: {{ item.name }} (ID: {{ item.id }}, Status: {{ item.status }})"

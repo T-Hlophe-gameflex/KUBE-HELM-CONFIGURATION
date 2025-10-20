@@ -12,5 +12,9 @@ spec:
   postgres_storage_class: standard
   projects_persistence: true
   projects_storage_class: standard
-  projects_existing_claim: ""
+  projects_existing_claim: awx-projects-claim
   replicas: 1
+
+  projects_storage_access_mode: ReadWriteOnce
+  projects_storage_size: 5Gi
+  projects_existing_claim: awx-projects-claim

@@ -1,3 +1,19 @@
+# Deploy AWX job templates and surveys for Cloudflare automation
+setup_awx_cloudflare() {
+    log_info "Setting up AWX job templates and surveys for Cloudflare automation..."
+    # Ensure AWX API token is set (user must create it in AWX UI and add to .env)
+    if [ -z "${AWX_API_TOKEN:-}" ]; then
+        log_warning "AWX API token not set. Please create an API token in AWX UI and add AWX_API_TOKEN to your .env file."
+        return
+    fi
+    # Run the Ansible playbook to set up AWX resources
+    ansible-playbook "$PROJECT_ROOT/automation/awx-cloudflare-survey-setup.yml"
+    if [ $? -eq 0 ]; then
+        log_success "AWX Cloudflare job templates and surveys created!"
+    else
+        log_error "Failed to create AWX Cloudflare job templates and surveys."
+    fi
+}
 #!/bin/bash
 set -euo pipefail
 
@@ -330,6 +346,7 @@ main() {
     deploy_stack
     wait_for_awx
     get_awx_info
+    setup_awx_cloudflare
     test_cloudflare_integration
     wait_for_services
     generate_sample_logs

@@ -1,0 +1,598 @@
+---
+  hosts: localhost
+  gather_facts: false
+  vars:
+    awx_api_url: "{{ (lookup('env','AWX_HOST') | default('http://localhost:30080')).rstrip('/') }}/api/v2"
+    awx_api_token: "{{ lookup('env','AWX_API_TOKEN') | default('') }}"
+    awx_username: "{{ lookup('env','AWX_USERNAME') | default('admin') }}"
+    awx_password: "{{ lookup('env','AWX_PASSWORD') | default('') }}"
+    cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
+    project_name: "Cloudflare DNS Project"
+    inventory_name: "localhost"
+    credential_name: "Cloudflare API Credentials"
+    cloudflare_credential_type_name: "Cloudflare API"
+    job_templates:
+      - name: "Cloudflare Domain Operations"
+        ---
+        - name: AWX Cloudflare Survey Setup
+          hosts: localhost
+          gather_facts: false
+          vars:
+            awx_host: "{{ lookup('env','AWX_HOST') | default('http://localhost:30080') }}"
+            awx_api_url: "{{ awx_host.rstrip('/') }}/api/v2"
+            awx_api_token: "{{ lookup('env','AWX_API_TOKEN') | default('') }}"
+            awx_username: "{{ lookup('env','AWX_USERNAME') | default('admin') }}"
+            awx_password: "{{ lookup('env','AWX_PASSWORD') | default('') }}"
+            cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
+            project_name: "Cloudflare DNS Project"
+            inventory_name: "localhost"
+            credential_name: "Cloudflare API Credentials"
+            ---
+            - name: AWX Cloudflare Survey Setup
+              hosts: localhost
+              gather_facts: false
+              vars:
+                awx_host: "{{ lookup('env','AWX_HOST') | default('http://localhost:30080') }}"
+                awx_api_url: "{{ awx_host.rstrip('/') }}/api/v2"
+                awx_api_token: "{{ lookup('env','AWX_API_TOKEN') | default('') }}"
+                awx_username: "{{ lookup('env','AWX_USERNAME') | default('admin') }}"
+                awx_password: "{{ lookup('env','AWX_PASSWORD') | default('') }}"
+                cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
+                project_name: "Cloudflare DNS Project"
+                inventory_name: "localhost"
+                credential_name: "Cloudflare API Credentials"
+                credential_type_name: "Cloudflare API"
+                job_templates:
+                  - name: "Cloudflare Domain Operations"
+                    playbook: "automation/tasks/cloudflare/domain-standardize.yml"
+                  - name: "Cloudflare Global Baseline"
+                    playbook: "automation/tasks/cloudflare/global-standardize.yml"
+                  - name: "Cloudflare Platform Sync"
+                    playbook: "automation/tasks/cloudflare/platform-sync.yml"
+
+              tasks:
+                - name: Obtain AWX token if not provided
+                  when: awx_api_token == ''
+                  uri:
+                    url: "{{ awx_api_url }}/tokens/"
+                    method: POST
+                    headers:
+                      Content-Type: "application/json"
+                    url_username: "{{ awx_username }}"
+                    url_password: "{{ awx_password }}"
+                    force_basic_auth: true
+                    return_content: true
+                  register: awx_token_result
+                  failed_when: false
+
+                - name: Set AWX API token from created token
+                  set_fact:
+                    awx_api_token: "{{ awx_token_result.json.token | default('') }}"
+                  when: awx_api_token == '' and awx_token_result.status == 201
+
+                - name: Ensure AWX API token available
+                  fail:
+                    msg: "AWX API token missing; set AWX_API_TOKEN or AWX_USERNAME/AWX_PASSWORD must be correct"
+                  when: awx_api_token == ''
+
+                - name: Prepare headers
+                  set_fact:
+                    awx_headers:
+                      Content-Type: "application/json"
+                      Authorization: "Bearer {{ awx_api_token }}"
+
+                - name: Create Cloudflare credential type
+                  uri:
+                    url: "{{ awx_api_url }}/credential_types/"
+                    method: POST
+                    body_format: json
+                    body:
+                      name: "{{ credential_type_name }}"
+                      kind: "cloud"
+                      description: "Cloudflare API token"
+                      inputs:
+                        fields:
+                          - id: api_token
+                            type: string
+                            label: API Token
+                            secret: true
+                      injectors:
+                        env:
+                          CLOUDFLARE_API_TOKEN: "{{ '{{ api_token }}' }}"
+                    headers: "{{ awx_headers }}"
+                    status_code: [201, 400]
+                  register: cred_type_res
+                  failed_when: false
+
+                - name: Create project
+                  uri:
+                    url: "{{ awx_api_url }}/projects/"
+                    method: POST
+                    body_format: json
+                    body:
+                      name: "{{ project_name }}"
+                      scm_type: manual
+                      local_path: /var/lib/awx/projects/cloudflare
+                    headers: "{{ awx_headers }}"
+                    status_code: [201, 400]
+                  register: project_res
+                  failed_when: false
+
+                - name: Create inventory
+                  uri:
+                    url: "{{ awx_api_url }}/inventories/"
+                    method: POST
+                    body_format: json
+                    body:
+                      name: "{{ inventory_name }}"
+                      variables: "ansible_connection: local\nansible_python_interpreter: {{ ansible_playbook_python | default('/usr/bin/python3') }}"
+                    headers: "{{ awx_headers }}"
+                    status_code: [201, 400]
+                  register: inventory_res
+                  failed_when: false
+
+                - name: Create Cloudflare credential
+                  uri:
+                    url: "{{ awx_api_url }}/credentials/"
+                    method: POST
+                    body_format: json
+                    body:
+                      name: "{{ credential_name }}"
+                      credential_type: "{{ cred_type_res.json.id | default(1) }}"
+                      inputs:
+                        api_token: "{{ cloudflare_api_token }}"
+                    headers: "{{ awx_headers }}"
+                    status_code: [201, 400]
+                  register: credential_res
+                  failed_when: false
+
+                - name: Create job templates
+                  uri:
+                    url: "{{ awx_api_url }}/job_templates/"
+                    method: POST
+                    body_format: json
+                    body:
+                      name: "{{ item.name }}"
+                      job_type: run
+                      inventory: "{{ inventory_res.json.id | default(inventory_name) }}"
+                      project: "{{ project_res.json.id | default(project_name) }}"
+                      playbook: "{{ item.playbook }}"
+                      credential: "{{ credential_res.json.id | default(credential_name) }}"
+                      survey_enabled: true
+                      ask_variables_on_launch: true
+                    headers: "{{ awx_headers }}"
+                    status_code: [201, 400]
+                  loop: "{{ job_templates }}"
+                  register: jt_res
+                  failed_when: false
+
+                - name: Print summary
+                  debug:
+                    msg:
+                      awx_token: "{{ awx_api_token }}"
+                      credential_type: "{{ cred_type_res.json | default(cred_type_res) }}"
+                      project: "{{ project_res.json | default(project_res) }}"
+                      inventory: "{{ inventory_res.json | default(inventory_res) }}"
+                      credential: "{{ credential_res.json | default(credential_res) }}"
+                      job_templates: "{{ jt_res.results | default(jt_res) }}"
+            failed_when: false
+
+          - name: Print summary
+            debug:
+              msg:
+                awx_token: "{{ awx_api_token }}"
+                credential_type: "{{ cred_type_res.json | default(cred_type_res) }}"
+                project: "{{ project_res.json | default(project_res) }}"
+                inventory: "{{ inventory_res.json | default(inventory_res) }}"
+                credential: "{{ credential_res.json | default(credential_res) }}"
+                job_templates: "{{ jt_res.results | default(jt_res) }}"
+                status_code: [201, 400]
+                body_format: json
+                body:
+                  name: "{{ project_name }}"
+                  scm_type: "manual"
+                  local_path: "/var/lib/awx/projects/cloudflare"
+                headers: "{{ awx_headers }}"
+              register: project_result
+              failed_when: false
+
+            - name: Set project_id
+              set_fact:
+                project_id: "{{ project_result.json.id | default('') }}"
+
+            - name: Create inventory
+              uri:
+                url: "{{ awx_api_url }}/inventories/"
+                method: POST
+                status_code: [201, 400]
+                body_format: json
+                body:
+                  name: "{{ inventory_name }}"
+                  variables: "ansible_connection: local\nansible_python_interpreter: {{ ansible_playbook_python | default('/usr/bin/python3') }}"
+                headers: "{{ awx_headers }}"
+              register: inventory_result
+              failed_when: false
+
+            - name: Set inventory_id
+              set_fact:
+                inventory_id: "{{ inventory_result.json.id | default('') }}"
+
+            - name: Create credential with API token
+              uri:
+                url: "{{ awx_api_url }}/credentials/"
+                method: POST
+                status_code: [201, 400]
+                body_format: json
+                body:
+                  name: "{{ credential_name }}"
+                  credential_type: "{{ credential_type_id }}"
+                  inputs:
+                    api_token: "{{ cloudflare_api_token }}"
+                headers: "{{ awx_headers }}"
+              register: credential_result
+              failed_when: false
+
+            - name: Set credential_id
+              set_fact:
+                credential_id: "{{ credential_result.json.id | default('') }}"
+
+            - name: Create job templates
+              uri:
+                url: "{{ awx_api_url }}/job_templates/"
+                method: POST
+                status_code: [201, 400]
+                body_format: json
+                body:
+                  name: "{{ item.name }}"
+                  job_type: "run"
+                  inventory: "{{ inventory_id if inventory_id != '' else inventory_name }}"
+                  project: "{{ project_id if project_id != '' else project_name }}"
+                  playbook: "{{ item.playbook }}"
+                  credential: "{{ credential_id if credential_id != '' else credential_name }}"
+                  survey_enabled: true
+                  ask_variables_on_launch: true
+                  extra_vars: "{{ {'workflow': (item.name | lower | replace(' ', '_'))} | to_nice_json }}"
+                headers: "{{ awx_headers }}"
+              loop: "{{ job_templates }}"
+              register: job_template_results
+              failed_when: false
+
+            - name: Show results
+              debug:
+                msg:
+                  credential_type: "{{ credential_type_result.json | default(credential_type_result) }}"
+                  project: "{{ project_result.json | default(project_result) }}"
+                  inventory: "{{ inventory_result.json | default(inventory_result) }}"
+                  credential: "{{ credential_result.json | default(credential_result) }}"
+                  job_templates: "{{ job_template_results.results | default(job_template_results) }}"
+            status_code: [201, 400]
+            body_format: json
+            body:
+              name: "{{ inventory_name }}"
+              variables: "ansible_connection: local\nansible_python_interpreter: {{ ansible_playbook_python }}"
+            headers: "{{ awx_headers }}"
+            return_content: true
+          register: inventory_result
+          failed_when: false
+
+        - name: Create Cloudflare credential
+          uri:
+            url: "{{ awx_api_url }}/credentials/"
+            method: POST
+            status_code: [201, 400]
+            body_format: json
+            body:
+              name: "{{ credential_name }}"
+              credential_type: "{{ cloudflare_credential_type_id }}"
+              inputs:
+                api_token: "{{ cloudflare_api_token }}"
+            headers: "{{ awx_headers }}"
+            return_content: true
+          register: credential_result
+          failed_when: false
+
+        - name: Create AWX Job Templates for Cloudflare DNS
+          uri:
+            url: "{{ awx_api_url }}/job_templates/"
+            method: POST
+            status_code: [201, 400]
+            body_format: json
+            body:
+              name: "{{ item.name }}"
+              job_type: "run"
+              inventory: "{{ inventory_name }}"
+              project: "{{ project_name }}"
+              playbook: "{{ item.playbook }}"
+              credential: "{{ credential_name }}"
+              survey_enabled: true
+              ask_variables_on_launch: true
+              extra_vars: "{{ {'workflow': (item.name | lower | replace(' ', '_'))} | to_nice_json }}"
+            headers: "{{ awx_headers }}"
+            return_content: true
+          loop: "{{ job_templates }}"
+          register: job_template_results
+          failed_when: false
+
+        - name: Report AWX job template creation results
+          debug:
+            var: job_template_results
+                name: "{{ inventory_name }}"
+                variables: "ansible_connection: local\nansible_python_interpreter: {{ ansible_playbook_python }}"
+              headers: "{{ awx_headers }}"
+              return_content: true
+            register: inventory_result
+            failed_when: false
+
+          - name: Ensure AWX Credential exists
+            uri:
+              url: "{{ awx_api_url }}/credentials/"
+              method: POST
+              status_code: [201, 400]
+              body_format: json
+              body:
+                name: "{{ credential_name }}"
+                credential_type: "{{ cloudflare_credential_type_id }}"
+                inputs:
+                  api_token: "{{ cloudflare_api_token }}"
+              headers: "{{ awx_headers }}"
+              return_content: true
+            register: credential_result
+            failed_when: false
+
+          - name: Create AWX Job Templates for Cloudflare DNS
+            uri:
+              url: "{{ awx_api_url }}/job_templates/"
+              method: POST
+              status_code: [201, 400]
+              body_format: json
+              body:
+                name: "{{ item.name }}"
+                job_type: "run"
+                inventory: "{{ inventory_name }}"
+                project: "{{ project_name }}"
+                playbook: "{{ item.playbook }}"
+                credential: "{{ credential_name }}"
+                survey_enabled: true
+                ask_variables_on_launch: true
+                extra_vars: "{{ {'workflow': (item.name | lower | replace(' ', '_'))} | to_nice_json }}"
+              headers: "{{ awx_headers }}"
+              return_content: true
+            loop: "{{ job_templates }}"
+            register: job_template_results
+            failed_when: false
+
+          - name: Report AWX job template creation results
+            debug:
+              var: job_template_results
+        url_password: "{{ awx_auth_pass | default(omit) }}"
+        force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) }}"
+        use_netrc: false
+        return_content: true
+      register: project_result
+      failed_when: false
+
+    - name: Create localhost inventory
+      uri:
+        url: "{{ awx_api_url }}/inventories/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ inventory_name }}"
+          variables: "ansible_connection: local\nansible_python_interpreter: {{ ansible_playbook_python }}"
+        headers: "{{ awx_headers }}"
+        url_username: "{{ awx_auth_user | default(omit) }}"
+        url_password: "{{ awx_auth_pass | default(omit) }}"
+        force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) }}"
+        use_netrc: false
+        return_content: true
+      register: inventory_result
+      failed_when: false
+
+    - name: Create Cloudflare credential
+      uri:
+        url: "{{ awx_api_url }}/credentials/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ credential_name }}"
+          credential_type: "{{ cloudflare_credential_type_id }}"
+          inputs:
+            api_token: "{{ cloudflare_api_token }}"
+        headers: "{{ awx_headers }}"
+        url_username: "{{ awx_auth_user | default(omit) }}"
+        url_password: "{{ awx_auth_pass | default(omit) }}"
+        force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) }}"
+        use_netrc: false
+        return_content: true
+      register: credential_result
+      failed_when: false
+
+    - name: Create job templates for Cloudflare playbooks
+      uri:
+        url: "{{ awx_api_url }}/job_templates/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ item.name }}"
+          job_type: "run"
+          inventory: "{{ inventory_name }}"
+          project: "{{ project_name }}"
+          playbook: "{{ item.playbook }}"
+          credential: "{{ credential_name }}"
+          survey_enabled: true
+          ask_variables_on_launch: true
+          extra_vars: "{{ {'workflow': (item.name | lower | replace(' ', '_'))} | to_nice_json }}"
+        headers: "{{ awx_headers }}"
+        url_username: "{{ awx_auth_user | default(omit) }}"
+        url_password: "{{ awx_auth_pass | default(omit) }}"
+        force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) }}"
+        use_netrc: false
+        return_content: true
+      loop: "{{ job_templates }}"
+      register: job_template_results
+      failed_when: false
+
+    - name: Show job template API results
+      debug:
+        var: job_template_results
+- name: AWX Cloudflare Survey Setup
+  hosts: localhost
+  gather_facts: false
+  vars:
+    awx_api_url: "{{ (lookup('env','AWX_HOST') or 'http://localhost:30080') }}/api/v2"
+    awx_api_token: "{{ lookup('env','AWX_API_TOKEN') }}"
+    cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+    project_name: "Cloudflare DNS Project"
+    inventory_name: "localhost"
+    credential_name: "Cloudflare API Credentials"
+    cloudflare_credential_type_name: "Cloudflare API"
+    cloudflare_credential_type_id: 1
+    job_templates:
+      - name: "Cloudflare Domain Operations"
+        playbook: "automation/tasks/cloudflare/domain-standardize.yml"
+      - name: "Cloudflare Global Baseline"
+        playbook: "automation/tasks/cloudflare/global-standardize.yml"
+      - name: "Cloudflare Platform Sync"
+        playbook: "automation/tasks/cloudflare/platform-sync.yml"
+
+  tasks:
+    - name: Prepare AWX auth headers and creds
+      set_fact:
+        awx_auth_user: "{{ lookup('env','AWX_USERNAME') | default('') }}"
+        awx_auth_pass: "{{ lookup('env','AWX_PASSWORD') | default('') }}"
+
+    - name: Set AWX headers using token if available
+      set_fact:
+        awx_headers:
+          Content-Type: "application/json"
+          Authorization: "Bearer {{ awx_api_token }}"
+      when: awx_api_token is defined and awx_api_token | length > 0
+
+    - name: Set AWX headers without Authorization when token missing
+      set_fact:
+        awx_headers:
+          Content-Type: "application/json"
+      when: not (awx_api_token is defined and awx_api_token | length > 0)
+
+    - name: Create or ensure Cloudflare credential type exists
+      uri:
+        url: "{{ awx_api_url }}/credential_types/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ cloudflare_credential_type_name }}"
+          kind: "cloud"
+          description: "Cloudflare API credentials"
+          inputs:
+            fields:
+              - id: "api_token"
+                type: "string"
+                label: "Cloudflare API Token"
+                secret: true
+                help_text: "Cloudflare API Token with DNS:Edit permissions"
+          injectors:
+            env:
+              CLOUDFLARE_API_TOKEN: "{{ '{{ api_token }}' }}"
+          headers: "{{ awx_headers }}"
+          url_username: "{{ awx_auth_user | default(omit) }}"
+          url_password: "{{ awx_auth_pass | default(omit) }}"
+          force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) | ternary(true, false) }}"
+          use_netrc: false
+          return_content: true
+      register: cloudflare_credential_type_result
+      failed_when: false
+
+    - name: Set credential type id from result when available
+      set_fact:
+        cloudflare_credential_type_id: "{{ cloudflare_credential_type_result.json.id | default(cloudflare_credential_type_id) }}"
+
+    - name: Ensure AWX Project exists
+      uri:
+        url: "{{ awx_api_url }}/projects/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ project_name }}"
+          scm_type: "manual"
+          local_path: "/var/lib/awx/projects/cloudflare"
+  headers: "{{ awx_headers }}"
+  url_username: "{{ awx_auth_user | default(omit) }}"
+  url_password: "{{ awx_auth_pass | default(omit) }}"
+  force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) | ternary(true, false) }}"
+  use_netrc: false
+  return_content: true
+      register: project_result
+      failed_when: false
+
+    - name: Ensure AWX Inventory exists
+      uri:
+        url: "{{ awx_api_url }}/inventories/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ inventory_name }}"
+          variables: "ansible_connection: local\nansible_python_interpreter: {{ ansible_playbook_python }}"
+  headers: "{{ awx_headers }}"
+  url_username: "{{ awx_auth_user | default(omit) }}"
+  url_password: "{{ awx_auth_pass | default(omit) }}"
+  force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) | ternary(true, false) }}"
+  use_netrc: false
+  return_content: true
+      register: inventory_result
+      failed_when: false
+
+    - name: Ensure AWX Credential exists
+      uri:
+        url: "{{ awx_api_url }}/credentials/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ credential_name }}"
+          credential_type: "{{ cloudflare_credential_type_id }}"
+          inputs:
+            api_token: "{{ cloudflare_api_token }}"
+        headers: "{{ awx_headers }}"
+        url_username: "{{ awx_auth_user | default(omit) }}"
+        url_password: "{{ awx_auth_pass | default(omit) }}"
+        force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) | ternary(true, false) }}"
+        use_netrc: false
+        return_content: true
+      register: credential_result
+      failed_when: false
+
+    - name: Create AWX Job Templates for Cloudflare DNS
+      uri:
+        url: "{{ awx_api_url }}/job_templates/"
+        method: POST
+        status_code: [201, 400]
+        body_format: json
+        body:
+          name: "{{ item.name }}"
+          job_type: "run"
+          inventory: "{{ inventory_name }}"
+          project: "{{ project_name }}"
+          playbook: "{{ item.playbook }}"
+          credential: "{{ credential_name }}"
+          survey_enabled: true
+          ask_variables_on_launch: true
+          extra_vars: "{{ {'workflow': (item.name | lower | replace(' ', '_'))} | to_nice_json }}"
+  headers: "{{ awx_headers }}"
+  url_username: "{{ awx_auth_user | default(omit) }}"
+  url_password: "{{ awx_auth_pass | default(omit) }}"
+  force_basic_auth: "{{ (awx_api_token is not defined or awx_api_token|length == 0) | ternary(true, false) }}"
+  use_netrc: false
+  return_content: true
+      loop: "{{ job_templates }}"
+      register: job_template_results
+      failed_when: false
+
+    - name: Report AWX job template creation results
+      debug:
+        var: job_template_results
