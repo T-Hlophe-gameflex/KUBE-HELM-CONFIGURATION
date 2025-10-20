@@ -10,7 +10,7 @@
     awx_password: "{{ lookup('env','AWX_PASSWORD') | default('', true) }}"
     cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('', true) }}"
     project_name: "Cloudflare DNS Project"
-    project_scm_url: ""  # if set, create a git-backed project using this URL
+    project_scm_url: "https://github.com/T-Hlophe-gameflex/KUBE-HELM-CONFIGURATION.git"  # if set, create a git-backed project using this URL
     inventory_name: "localhost"
     credential_name: "Cloudflare API Credentials"
     credential_type_name: "Cloudflare API"

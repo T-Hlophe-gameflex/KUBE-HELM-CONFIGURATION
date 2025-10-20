@@ -1,0 +1,73 @@
+---
+- name: AWX - Remove non-Cloudflare Job Templates
+  hosts: localhost
+  gather_facts: false
+  vars:
+    awx_host: "{{ lookup('env','AWX_HOST') | default('http://localhost:30080', true) }}"
+    awx_api_url: "{{ awx_host.rstrip('/') }}/api/v2"
+    awx_api_token: "{{ lookup('env','AWX_API_TOKEN') | default('', true) }}"
+    awx_username: "{{ lookup('env','AWX_USERNAME') | default('admin', true) }}"
+    awx_password: "{{ lookup('env','AWX_PASSWORD') | default('', true) }}"
+
+  tasks:
+    - name: Obtain AWX token if not provided
+      when: awx_api_token == ''
+      uri:
+        url: "{{ awx_api_url }}/tokens/"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        url_username: "{{ awx_username }}"
+        url_password: "{{ awx_password }}"
+        force_basic_auth: true
+        return_content: true
+      register: awx_token_result
+      failed_when: false
+
+    - name: Set AWX API token from created token
+      set_fact:
+        awx_api_token: "{{ awx_token_result.json.token | default('') }}"
+      when: awx_api_token == '' and awx_token_result.status == 201
+
+    - name: Ensure AWX API token available
+      fail:
+        msg: "AWX API token missing; set AWX_API_TOKEN or AWX_USERNAME/AWX_PASSWORD must be correct"
+      when: awx_api_token == ''
+
+    - name: Prepare headers
+      set_fact:
+        awx_headers:
+          Content-Type: "application/json"
+          Authorization: "Bearer {{ awx_api_token }}"
+
+    - name: Get all job templates
+      uri:
+        url: "{{ awx_api_url }}/job_templates/?page_size=200"
+        method: GET
+        headers: "{{ awx_headers }}"
+        return_content: true
+      register: jt_list
+      failed_when: false
+
+    - name: Build list of templates to delete (not containing 'Cloudflare')
+      set_fact:
+        to_delete: "{{ jt_list.json.results | selectattr('name','search','^(?!.*Cloudflare).*') | list }}"
+
+    - name: Debug - templates to delete
+      debug:
+        var: to_delete
+
+    - name: Delete non-Cloudflare job templates
+      when: to_delete | length > 0
+      uri:
+        url: "{{ awx_api_url }}/job_templates/{{ item.id }}/"
+        method: DELETE
+        headers: "{{ awx_headers }}"
+        status_code: [204, 404]
+      loop: "{{ to_delete }}"
+      register: del_results
+      failed_when: false
+
+    - name: Print deletion results
+      debug:
+        var: del_results.results
