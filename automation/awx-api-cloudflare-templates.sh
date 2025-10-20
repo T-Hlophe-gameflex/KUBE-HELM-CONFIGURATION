@@ -33,7 +33,7 @@ if [ -z "$INVENTORY_ID" ] || [ -z "$PROJECT_ID" ] || [ -z "$CRED_ID" ]; then
 fi
 
 # Set this to the playbook path prefix relative to your AWX project root
-PLAYBOOK_PATH_PREFIX=""
+PLAYBOOK_PATH_PREFIX="automation/tasks/cloudflare/"
 # If your AWX project root is the repo root, use: PLAYBOOK_PATH_PREFIX="automation/tasks/cloudflare/"
 # If your AWX project root is automation/tasks/cloudflare, use: PLAYBOOK_PATH_PREFIX=""
 
