@@ -157,6 +157,13 @@
     return_content: true
   register: manage_record_result
 
+- name: Dry-run: show planned Cloudflare request
+  debug:
+    msg:
+      - "DRY RUN: would call {{ record_method }} {{ record_endpoint }}"
+      - "payload: {{ record_payload }}"
+  when: dry_run | default(false)
+
 - name: Update change log for manage_record
   set_fact:
     change_log: "{{ change_log + [manage_record_summary] }}"
