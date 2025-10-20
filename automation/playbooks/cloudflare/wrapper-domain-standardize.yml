@@ -2,4 +2,4 @@
 - hosts: localhost
   gather_facts: false
   tasks:
-  - include_tasks: domain-standardize.yml
+    - include_tasks: ../../tasks/cloudflare/domain-standardize.yml
