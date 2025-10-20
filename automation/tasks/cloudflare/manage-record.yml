@@ -111,7 +111,7 @@
       type: "{{ effective_record_type }}"
       name: "{{ effective_record_name if effective_record_name != '@' else active_domain }}"
       content: "{{ effective_record_content }}"
-      ttl: {{ effective_record_ttl }}
+      ttl: "{{ effective_record_ttl }}"
 
 - name: Combine proxied flag when specified
   set_fact:

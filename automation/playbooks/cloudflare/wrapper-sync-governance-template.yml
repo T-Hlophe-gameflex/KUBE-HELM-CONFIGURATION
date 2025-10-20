@@ -2,4 +2,4 @@
 - hosts: localhost
   gather_facts: false
   tasks:
-    - include_tasks: ../../tasks/cloudflare/sync-governance-template.yml
+  - include_tasks: sync-governance-template.yml

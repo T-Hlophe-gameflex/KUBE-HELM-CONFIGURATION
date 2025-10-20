@@ -17,7 +17,7 @@
           type: "{{ target.type }}"
           name: "{{ target.name }}"
           content: "{{ target.content }}"
-          ttl: {{ target.desired_ttl | int }}
+          ttl: "{{ target.desired_ttl | int }}"
 
     - name: Include proxied flag when enforced
       set_fact:

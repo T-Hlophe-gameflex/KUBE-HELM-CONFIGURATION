@@ -74,7 +74,7 @@
           type: "{{ target.type }}"
           name: "{{ target.name if target.name not in ['@', target.domain] else target.domain }}"
           content: "{{ target.value }}"
-          ttl: {{ target.ttl | int }}
+          ttl: "{{ target.ttl | int }}"
 
     - name: Append proxied flag when provided
       set_fact:
