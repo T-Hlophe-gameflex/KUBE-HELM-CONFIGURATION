@@ -4,14 +4,24 @@
   connection: local
   gather_facts: false
   tasks:
-    - name: Snapshot runner inventory to /tmp for inspection
-      shell: |
-        if [ -n "$AWX_PRIVATE_DATA_DIR" ] && [ -f "$AWX_PRIVATE_DATA_DIR/inventory/hosts" ]; then
-          cp "$AWX_PRIVATE_DATA_DIR/inventory/hosts" /tmp/awx_inventory_snapshot.json || true
-        fi
-      args:
-        executable: /bin/bash
-      ignore_errors: yes
+    - name: Snapshot runner inventory to /tmp for inspection (Ansible copy)
+      block:
+        - name: Determine AWX private data dir from env
+          set_fact:
+            awx_pdd: "{{ lookup('env','AWX_PRIVATE_DATA_DIR') | default('') }}"
+
+        - name: Snapshot inventory file if present
+          copy:
+            src: "{{ awx_pdd }}/inventory/hosts"
+            dest: /tmp/awx_inventory_snapshot.json
+            remote_src: yes
+          when: awx_pdd != ''
+      rescue:
+        - debug:
+            msg: "Could not snapshot inventory (it may not exist yet)"
+      always:
+        - debug:
+            msg: "Snapshot step finished"
 
     - name: Pause for debugging
       pause:
