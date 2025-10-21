@@ -1,0 +1,40 @@
+---
+- name: Cloudflare Platform Workflow
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | trim | regex_replace('\\s+$','') }}"
+    dry_run: true
+
+  tasks:
+    - name: Announce dry-run mode
+      debug:
+        msg: "Running in dry_run={{ dry_run }}; mutating actions are skipped unless dry_run is false."
+
+    - name: Fetch all Cloudflare zones (domains)
+      uri:
+        validate_certs: false
+        url: "https://api.cloudflare.com/client/v4/zones"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: true
+      register: zones_response
+      check_mode: no
+
+    - name: Set available domains
+      set_fact:
+        available_domains: "{{ (zones_response.json.result | default([])) | map(attribute='name') | list }}"
+
+    - name: Debug available domains
+      debug:
+        var: available_domains
+
+    - name: Audit each domain for standards and drift
+      include_tasks: audit-domain.yml
+      loop: "{{ available_domains }}"
+      loop_control:
+        loop_var: domain
+
+

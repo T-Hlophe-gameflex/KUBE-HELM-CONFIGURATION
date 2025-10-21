@@ -1,0 +1,28 @@
+*** Begin Patch
+*** Update File: /var/lib/awx/venv/awx/lib/python3.11/site-packages/awx/main/tasks/jobs.py
+@@
+-    def write_inventory_file(self, inventory, private_data_dir, file_name, script_params):
+-        """Write a dynamic inventory script file (python) that prints JSON.
+-        This historically writes a small python script with a print(json.dumps(...))
+-        which in some environments has been observed to be concatenated with the
+-        file coding header, causing Ansible to fail parsing the resulting file.
+-        """
+-
+-        script_data = inventory.get_script_data()
+-        script_text = "#! /usr/bin/env python3\n# -*- coding: utf-8 -*-\nprint(%r)\n" % json.dumps(script_data)
+-        return self.write_private_data_file(private_data_dir, file_name, script_text, sub_dir='inventory', file_permissions=0o755)
++    def write_inventory_file(self, inventory, private_data_dir, file_name, script_params):
++        """Write the inventory into a static JSON file.
++
++        Writing plain JSON (instead of an executable python script that prints
++        JSON) avoids subtle concatenation and newline issues when the file is
++        mounted into the execution environment. Ansible can read a JSON file
++        directly as an inventory source.
++        """
++
++        script_data = inventory.get_script_data()
++        # Produce stable JSON text with a trailing newline.
++        json_text = json.dumps(script_data, ensure_ascii=False) + "\n"
++        # Write the JSON into the inventory subdirectory with safe permissions.
++        return self.write_private_data_file(private_data_dir, file_name, json_text, sub_dir='inventory', file_permissions=0o644)
+*** End Patch

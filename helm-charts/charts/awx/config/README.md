@@ -181,3 +181,19 @@ Enable verbose logging by setting verbosity to 3 in job templates for detailed d
 - Use AWX REST API for programmatic job launches
 - Integrate with CI/CD pipelines for automated DNS updates
 - Connect with monitoring systems for dynamic record management
+
+## HTTPS testing helper
+
+If you need to validate AWX API calls over HTTPS locally, a small nginx reverse-proxy manifest and helper script are provided to terminate TLS using the generated test certificate.
+
+1. Generate certs (if you haven't already):
+  - run `./generate-awx-cert.sh 127.0.0.1`
+2. Deploy the proxy and TLS secret:
+  - run `./deploy-nginx-awx-proxy.sh`
+3. Port-forward the proxy to localhost (run in a separate terminal):
+  - `kubectl -n awx port-forward svc/nginx-awx-proxy 8043:443`
+4. Re-run the Ansible playbook against `https://127.0.0.1:8043` with `awx_validate_certs=true` and `awx_ca_cert` set to the generated CA.
+
+Notes:
+- This is a short-lived testing helper and should not be used as production ingress.
+- The proxy points to the existing `ansible-awx-service` service on port 80 and terminates TLS only.

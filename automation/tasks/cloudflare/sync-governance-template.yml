@@ -53,6 +53,7 @@
     body_format: json
     body: "{{ current_survey_spec }}"
     status_code: 200
+  when: (dry_run | default(true) | bool) == false
 
 - name: Track governance template update
   set_fact:

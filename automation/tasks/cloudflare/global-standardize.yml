@@ -47,4 +47,6 @@
   loop: "{{ global_standardize_targets }}"
   loop_control:
     loop_var: target
-  when: global_standardize_targets | length > 0
+  when:
+    - global_standardize_targets | length > 0
+    - (dry_run | default(true) | bool) == false

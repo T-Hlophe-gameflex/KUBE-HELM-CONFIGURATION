@@ -1,0 +1,9 @@
+[req]
+req_extensions = v3_req
+distinguished_name = dn
+[ dn ]
+[ v3_req ]
+subjectAltName = @alt_names
+[ alt_names ]
+DNS.1 = 127.0.0.1
+IP.1 = 127.0.0.1

@@ -26,6 +26,7 @@
   when:
     - standard_zone_settings | length > 0
     - domain_setting_targets | length > 0
+    - (dry_run | default(true) | bool) == false
 
 - name: Append zone standardization summary
   set_fact:
