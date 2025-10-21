@@ -6,7 +6,7 @@
   tasks:
     - name: Pause for debugging
       pause:
-        seconds: 120
+        seconds: 600
 
     - name: Include original wrapper
       import_playbook: wrapper-manage-record.yml
