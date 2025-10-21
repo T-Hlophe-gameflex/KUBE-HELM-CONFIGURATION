@@ -1,0 +1,12 @@
+---
+- name: Debug wrapper to keep runner alive
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Pause for debugging
+      pause:
+        seconds: 120
+
+    - name: Include original wrapper
+      import_playbook: wrapper-manage-record.yml
