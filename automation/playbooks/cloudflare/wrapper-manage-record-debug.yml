@@ -4,6 +4,15 @@
   connection: local
   gather_facts: false
   tasks:
+    - name: Snapshot runner inventory to /tmp for inspection
+      shell: |
+        if [ -n "$AWX_PRIVATE_DATA_DIR" ] && [ -f "$AWX_PRIVATE_DATA_DIR/inventory/hosts" ]; then
+          cp "$AWX_PRIVATE_DATA_DIR/inventory/hosts" /tmp/awx_inventory_snapshot.json || true
+        fi
+      args:
+        executable: /bin/bash
+      ignore_errors: yes
+
     - name: Pause for debugging
       pause:
         seconds: 600
