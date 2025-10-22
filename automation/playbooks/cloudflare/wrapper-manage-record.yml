@@ -2,10 +2,6 @@
 - hosts: localhost
   connection: local
   gather_facts: false
----
-- hosts: localhost
-  connection: local
-  gather_facts: false
 
   tasks:
     - name: Map survey variables -> playbook variables
