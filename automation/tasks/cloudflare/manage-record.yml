@@ -10,6 +10,10 @@
     effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
     effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
 
+- name: Normalize dry_run to boolean
+  set_fact:
+    dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
+
 - name: Validate required fields
   assert:
     that:
@@ -23,7 +27,6 @@
 
 - name: Normalize proxied flag
   set_fact:
-    # None means 'not provided' so downstream can choose default behavior
     effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
 
 - name: Build record payload
@@ -39,15 +42,82 @@
     record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
   when: effective_record_proxied is not none
 
-- name: Compute record endpoint (placeholder)
-  set_fact:
-    record_endpoint: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}/zones/{{ zone_map[active_domain] | default('ZONE_ID') }}/dns_records"
-    record_method: "POST"
+- name: Prepare for Cloudflare lookup
+  block:
+    - name: Ensure CLOUDFLARE_API_TOKEN available (prefer extra_var)
+      set_fact:
+        cloudflare_api_token: "{{ cloudflare_api_token | default( lookup('env','CLOUDFLARE_API_TOKEN') | default('') | trim ) }}"
 
-- name: "Dry-run: show planned Cloudflare request"
+    - name: Fail if CLOUDFLARE_API_TOKEN missing when not dry_run
+      fail:
+        msg: "CLOUDFLARE_API_TOKEN environment variable is required for mutating operations."
+      when: not dry_run_bool and cloudflare_api_token == ''
+
+    - name: Infer active_domain from full record name when not provided
+      set_fact:
+        active_domain: "{{ (effective_record_name | regex_replace('^[^.]+\\.(.*)$','\\1')) }}"
+      when:
+        - active_domain | default('') == ''
+        - effective_record_name is defined
+        - effective_record_name | regex_search('\\.')
+
+    - name: Lookup zone id from Cloudflare for active_domain
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones?name={{ active_domain }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: true
+      register: zone_lookup
+      when: not dry_run_bool
+
+    - name: Fail if zone not found in Cloudflare
+      fail:
+        msg: "Could not find Cloudflare zone for domain '{{ active_domain }}' (ensure token has permission)."
+      when: not dry_run_bool and (zone_lookup is not defined or zone_lookup.json is not defined or (zone_lookup.json.result | length == 0))
+
+    - name: Set zone_id fact
+      set_fact:
+        zone_id: "{{ zone_lookup.json.result[0].id }}"
+      when: not dry_run_bool
+
+    - name: Compute record endpoint
+      set_fact:
+        record_endpoint: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}/zones/{{ zone_id | default(zone_map[active_domain] | default('ZONE_ID')) }}/dns_records"
+        record_method: "POST"
+  when: true
+
+- name: Dry-run: show planned Cloudflare request
   debug:
     msg:
       - "DRY RUN: would call {{ record_method }} {{ record_endpoint }}"
       - "payload: {{ record_payload }}"
-  when: dry_run | default(false)
+  when: dry_run_bool
+
+- name: Apply Cloudflare record change
+  uri:
+    url: "{{ record_endpoint }}"
+    method: "{{ record_method }}"
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token | default('') }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ record_payload | to_json }}"
+    return_content: true
+    status_code: [200, 201]
+  register: cloudflare_result
+  when: not dry_run_bool
+
+- name: Report Cloudflare response
+  debug:
+    msg:
+      - "Cloudflare response status: {{ cloudflare_result.status | default('none') }}"
+      - "Cloudflare response json: {{ cloudflare_result.json | default(cloudflare_result.content | default({})) }}"
+  when: cloudflare_result is defined
+
+- name: Fail if Cloudflare reported an error
+  fail:
+    msg: "Cloudflare API request failed: {{ cloudflare_result.json.errors | default(cloudflare_result.json | default(cloudflare_result.content)) }}"
+  when: cloudflare_result is defined and not (cloudflare_result.json.success | default(false) | bool)
 
