@@ -1,7 +1,6 @@
 ---
 # Minimal manage-record tasks used by AWX wrapper for dry-run testing
 
-- name: Set input variables
   set_fact:
     active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
     effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
@@ -10,40 +9,32 @@
     effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
     effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
 
-- name: Normalize dry_run to boolean
   set_fact:
     dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
 
-- name: Validate required fields
   assert:
     that:
       - effective_record_type is not none
       - effective_record_content is not none
     fail_msg: "record_type and record_value must be provided."
 
-- name: Normalize TTL
   set_fact:
     effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
 
-- name: Normalize proxied flag
   set_fact:
     effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
   
 # compute a safe, simple full name for the record to avoid complex inline expressions
-- name: Compute effective_record_full_name
   set_fact:
     effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
 
-- name: Build record payload
   set_fact:
     record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
 
-- name: Add proxied flag when provided
   set_fact:
     record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
   when: effective_record_proxied is not none
 
-- name: Prepare for Cloudflare lookup
   block:
     - name: Ensure CLOUDFLARE_API_TOKEN available (prefer extra_var)
       set_fact:
@@ -102,7 +93,39 @@
         msg: "{{ record_payload | to_nice_json }}"
       when: dry_run_bool
 
-- name: Apply Cloudflare record change
+    - name: Lookup existing DNS record for this name/type
+      uri:
+        url: "{{ api_base }}/zones/{{ zone_id }}/dns_records?name={{ effective_record_full_name }}&type={{ effective_record_type }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cloudflare_api_token }}"
+          Content-Type: "application/json"
+        return_content: true
+      register: existing_record_lookup
+      when: not dry_run_bool
+
+    - name: Set existing_record facts when present
+      set_fact:
+        existing_record: "{{ existing_record_lookup.json.result[0] }}"
+        existing_record_id: "{{ existing_record_lookup.json.result[0].id }}"
+      when: not dry_run_bool and (existing_record_lookup.json is defined and (existing_record_lookup.json.result | length) > 0)
+
+    - name: Determine if record needs update
+      set_fact:
+        record_needs_update: "{{ (existing_record.content != effective_record_content) or (existing_record.ttl | int != (effective_record_ttl | int)) or ((existing_record.proxied | default(false)) != (effective_record_proxied | default(false))) }}"
+      when: existing_record is defined
+
+    - name: Skip apply when existing record already matches desired state
+      set_fact:
+        cloudflare_result: "{{ {'json': {'success': True, 'result': existing_record}, 'status': 200} }}"
+      when: existing_record is defined and not record_needs_update
+
+    - name: Use UPDATE endpoint when existing record needs change
+      set_fact:
+        record_method: "PUT"
+        record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records/{{ existing_record_id }}"
+      when: existing_record is defined and record_needs_update
+
   uri:
     url: "{{ record_endpoint }}"
     method: "{{ record_method }}"
@@ -116,14 +139,12 @@
   register: cloudflare_result
   when: not dry_run_bool
 
-- name: Report Cloudflare response
   debug:
     msg:
       - "Cloudflare response status: {{ cloudflare_result.status | default('none') }}"
       - "Cloudflare response json: {{ cloudflare_result.json | default(cloudflare_result.content | default({})) }}"
   when: cloudflare_result is defined
 
-- name: Fail if Cloudflare reported an error
   fail:
     msg: "Cloudflare API request failed: {{ cloudflare_result.json.errors | default(cloudflare_result.json | default(cloudflare_result.content)) }}"
   when: cloudflare_result is defined and not (cloudflare_result.json.success | default(false) | bool)
