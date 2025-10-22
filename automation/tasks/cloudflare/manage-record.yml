@@ -1,6 +1,21 @@
 ---
-# Minimal manage-record tasks used by AWX wrapper for dry-run testing
+- name: Sanity: set a few simple facts
+  set_fact:
+    effective_record_full_name: "Test-awx.efutechnologies.co.za"
+    effective_record_type: "CNAME"
+    effective_record_content: "example.com"
 
+- name: Sanity: show the simple facts
+  debug:
+    msg:
+      - "record_name={{ effective_record_full_name }}"
+      - "record_type={{ effective_record_type }}"
+      - "record_value={{ effective_record_content }}"
+---
+---
+# Minimal, clean manage-record tasks file used by AWX wrapper
+
+- name: Set input variables
   set_fact:
     active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
     effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
@@ -9,41 +24,127 @@
     effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
     effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
 
+- name: Normalize dry_run to boolean
   set_fact:
     dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
 
-  assert:
-    that:
-      - effective_record_type is not none
-      - effective_record_content is not none
-    fail_msg: "record_type and record_value must be provided."
+- name: Ensure CLOUDFLARE_API_TOKEN (env or extra_var)
+  set_fact:
+    cloudflare_api_token: "{{ cloudflare_api_token | default( lookup('env','CLOUDFLARE_API_TOKEN') | default('') | trim ) }}"
 
+- name: Fail if CLOUDFLARE_API_TOKEN missing when not dry_run
+  fail:
+    msg: "CLOUDFLARE_API_TOKEN environment variable is required for mutating operations."
+  when: not dry_run_bool and cloudflare_api_token == ''
+
+- name: Normalize TTL and proxied flag
   set_fact:
     effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
-
-  set_fact:
     effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
-  
-# compute a safe, simple full name for the record to avoid complex inline expressions
+
+- name: Compute effective_record_full_name
   set_fact:
     effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
 
+- name: Build record payload
   set_fact:
     record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
 
+- name: Add proxied flag when provided
   set_fact:
     record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
   when: effective_record_proxied is not none
 
-  block:
-    - name: Ensure CLOUDFLARE_API_TOKEN available (prefer extra_var)
-      set_fact:
-        cloudflare_api_token: "{{ cloudflare_api_token | default( lookup('env','CLOUDFLARE_API_TOKEN') | default('') | trim ) }}"
+- name: Ensure api_base is set
+  set_fact:
+    api_base: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}"
 
-    - name: Fail if CLOUDFLARE_API_TOKEN missing when not dry_run
-      fail:
-        msg: "CLOUDFLARE_API_TOKEN environment variable is required for mutating operations."
-      ---
+- name: Lookup zone id from Cloudflare for active_domain
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    return_content: true
+  when: not dry_run_bool
+
+- name: Fail if zone not found in Cloudflare
+  fail:
+    msg: "Could not find Cloudflare zone for domain '{{ active_domain }}' (ensure token has permission)."
+  when: not dry_run_bool and (zone_lookup is not defined or zone_lookup.json is not defined or (zone_lookup.json.result | length == 0))
+
+- name: Set zone_id fact
+  set_fact:
+    zone_id: "{{ zone_lookup.json.result[0].id }}"
+  when: not dry_run_bool
+
+- name: Compute record endpoint and default method
+  set_fact:
+    record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records"
+    record_method: "POST"
+  when: zone_id is defined
+
+- name: Lookup existing DNS record for this name/type
+  uri:
+    url: "{{ api_base }}/zones/{{ zone_id }}/dns_records?name={{ effective_record_full_name }}&type={{ effective_record_type }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    return_content: true
+  register: existing_record_lookup
+  when: not dry_run_bool and zone_id is defined
+
+- name: Set existing_record facts when present
+  set_fact:
+    existing_record: "{{ existing_record_lookup.json.result[0] | default(omit) }}"
+    existing_record_id: "{{ existing_record_lookup.json.result[0].id | default(omit) }}"
+  when: existing_record_lookup is defined and (existing_record_lookup.json.result | length > 0)
+
+- name: Determine if record needs update
+  set_fact:
+    record_needs_update: "{{ (existing_record.content != effective_record_content) or (existing_record.ttl | int != (effective_record_ttl | int)) or ((existing_record.proxied | default(false)) != (effective_record_proxied | default(false))) }}"
+  when: existing_record is defined
+
+- name: Skip apply when existing record already matches desired state
+  set_fact:
+    cloudflare_result: "{{ {'json': {'success': True, 'result': existing_record}, 'status': 200} }}"
+  when: existing_record is defined and (record_needs_update is not defined or not record_needs_update)
+
+- name: Use UPDATE endpoint when existing record needs change
+  set_fact:
+    record_method: "PUT"
+    record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records/{{ existing_record_id }}"
+  when: existing_record is defined and record_needs_update
+
+- name: Apply Cloudflare record change
+  uri:
+    url: "{{ record_endpoint }}"
+    method: "{{ record_method }}"
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token | default('') }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ record_payload | to_json }}"
+    return_content: true
+    status_code: [200, 201]
+  register: cloudflare_result
+  when: not dry_run_bool and record_endpoint is defined
+
+- name: Report Cloudflare response
+  debug:
+    msg:
+      - "Cloudflare response status: {{ cloudflare_result.status | default('none') }}"
+      - "Cloudflare response json: {{ cloudflare_result.json | default(cloudflare_result.content | default({})) }}"
+  when: cloudflare_result is defined
+
+- name: Fail if Cloudflare reported an error
+  fail:
+    msg: "Cloudflare API request failed: {{ cloudflare_result.json.errors | default(cloudflare_result.json | default(cloudflare_result.content)) }}"
+  when: cloudflare_result is defined and not (cloudflare_result.json.success | default(false) | bool)
+---
+# Minimal manage-record tasks used by AWX wrapper for dry-run testing
+
+# (Removed duplicate set_fact and related blocks to ensure unique map keys)
 
       # Minimal manage-record tasks used by AWX wrapper for dry-run testing
 
@@ -82,6 +183,43 @@
 
       - name: Build record payload
         set_fact:
+      ---
+      # Minimal manage-record tasks used by AWX wrapper for dry-run testing
+
+      - name: Set input variables
+        set_fact:
+          active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
+          effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+          effective_record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+          effective_record_content: "{{ survey_record_value | default(record_value | default('')) }}"
+          effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
+          effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
+
+      - name: Normalize dry_run to boolean
+        set_fact:
+          dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
+
+      - name: Validate required fields
+        assert:
+          that:
+            - effective_record_type is not none
+            - effective_record_content is not none
+          fail_msg: "record_type and record_value must be provided."
+
+      - name: Normalize TTL
+        set_fact:
+          effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
+
+      - name: Normalize proxied flag
+        set_fact:
+          effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
+
+      - name: Compute effective_record_full_name
+        set_fact:
+          effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
+
+      - name: Build record payload
+        set_fact:
           record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
 
       - name: Add proxied flag when provided
@@ -89,7 +227,41 @@
           record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
         when: effective_record_proxied is not none
 
-      - name: Prepare for Cloudflare lookup
+      # Minimal manage-record tasks used by AWX wrapper for dry-run testing
+
+        set_fact:
+          active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
+          effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+          effective_record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+          effective_record_content: "{{ survey_record_value | default(record_value | default('')) }}"
+          effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
+          effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
+
+        set_fact:
+          dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
+
+        assert:
+          that:
+            - effective_record_type is not none
+            - effective_record_content is not none
+          fail_msg: "record_type and record_value must be provided."
+
+        set_fact:
+          effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
+
+        set_fact:
+          effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
+
+        set_fact:
+          effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
+
+        set_fact:
+          record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
+
+        set_fact:
+          record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
+        when: effective_record_proxied is not none
+
         block:
           - name: Ensure CLOUDFLARE_API_TOKEN available (prefer extra_var)
             set_fact:
@@ -98,156 +270,228 @@
           - name: Fail if CLOUDFLARE_API_TOKEN missing when not dry_run
             fail:
               msg: "CLOUDFLARE_API_TOKEN environment variable is required for mutating operations."
-            ---
----
-# Minimal manage-record tasks used by AWX wrapper for dry-run testing
+            when: not dry_run_bool and cloudflare_api_token == ''
 
-- name: Set input variables
-  set_fact:
-    active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
-    effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
-    effective_record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
-    effective_record_content: "{{ survey_record_value | default(record_value | default('')) }}"
-    effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
-    effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
+          - name: Infer active_domain from full record name when not provided
+            set_fact:
+              active_domain: "{{ (effective_record_name | regex_replace('^[^.]+\\.(.*)$','\\1')) }}"
+            when:
+              - active_domain | default('') == ''
+              - effective_record_name is defined
+              - effective_record_name | regex_search('\\.')
 
-- name: Normalize dry_run to boolean
-  set_fact:
-    dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
+          - name: Lookup zone id from Cloudflare for active_domain
+            uri:
+              url: "https://api.cloudflare.com/client/v4/zones?name={{ active_domain }}"
+              method: GET
+              headers:
+                Authorization: "Bearer {{ cloudflare_api_token }}"
+                Content-Type: "application/json"
+              return_content: true
+            register: zone_lookup
+            when: not dry_run_bool
 
-- name: Validate required fields
-  assert:
-    that:
-      - effective_record_type is not none
-      - effective_record_content is not none
-    fail_msg: "record_type and record_value must be provided."
+          - name: Fail if zone not found in Cloudflare
+            fail:
+              msg: "Could not find Cloudflare zone for domain '{{ active_domain }}' (ensure token has permission)."
+            when: not dry_run_bool and (zone_lookup is not defined or zone_lookup.json is not defined or (zone_lookup.json.result | length == 0))
 
-- name: Normalize TTL
-  set_fact:
-    effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
+          - name: Set zone_id fact
+            set_fact:
+              zone_id: "{{ zone_lookup.json.result[0].id }}"
+            when: not dry_run_bool
 
-- name: Normalize proxied flag
-  set_fact:
-    effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
+          - name: Ensure api_base is set
+            set_fact:
+              api_base: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}"
 
-- name: Compute effective_record_full_name
-  set_fact:
-    effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
+          - name: Compute record endpoint
+            set_fact:
+              record_endpoint: "{{ api_base }}/zones/{{ zone_id | default(zone_map[active_domain] | default('ZONE_ID')) }}/dns_records"
+              record_method: "POST"
 
-- name: Build record payload
-  set_fact:
-    record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
+          - name: Lookup existing DNS record for this name/type
+            uri:
+              url: "{{ api_base }}/zones/{{ zone_id }}/dns_records?name={{ effective_record_full_name }}&type={{ effective_record_type }}"
+              method: GET
+              headers:
+                Authorization: "Bearer {{ cloudflare_api_token }}"
+                Content-Type: "application/json"
+              return_content: true
+            register: existing_record_lookup
+            when: not dry_run_bool
 
-- name: Add proxied flag when provided
-  set_fact:
-    record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
-  when: effective_record_proxied is not none
+          - name: Set existing_record facts when present
+            set_fact:
+              existing_record: "{{ existing_record_lookup.json.result[0] }}"
+              existing_record_id: "{{ existing_record_lookup.json.result[0].id }}"
+            when: not dry_run_bool and (existing_record_lookup.json is defined and (existing_record_lookup.json.result | length) > 0)
 
-- name: Prepare and lookup zone + existing record
-  block:
-    - name: Ensure CLOUDFLARE_API_TOKEN available (prefer extra_var)
-      set_fact:
-        cloudflare_api_token: "{{ cloudflare_api_token | default( lookup('env','CLOUDFLARE_API_TOKEN') | default('') | trim ) }}"
+          - name: Determine if record needs update
+            set_fact:
+              record_needs_update: "{{ (existing_record.content != effective_record_content) or (existing_record.ttl | int != (effective_record_ttl | int)) or ((existing_record.proxied | default(false)) != (effective_record_proxied | default(false))) }}"
+            when: existing_record is defined
 
-    - name: Fail if CLOUDFLARE_API_TOKEN missing when not dry_run
-      fail:
-        msg: "CLOUDFLARE_API_TOKEN environment variable is required for mutating operations."
-      when: not dry_run_bool and cloudflare_api_token == ''
+          - name: Skip apply when existing record already matches desired state
+            set_fact:
+              cloudflare_result: "{{ {'json': {'success': True, 'result': existing_record}, 'status': 200} }}"
+            when: existing_record is defined and not record_needs_update
 
-    - name: Infer active_domain from full record name when not provided
-      set_fact:
-        active_domain: "{{ (effective_record_name | regex_replace('^[^.]+\\.(.*)$','\\1')) }}"
-      when:
-        - active_domain | default('') == ''
-        - effective_record_name is defined
-        - effective_record_name | regex_search('\\.')
+          - name: Use UPDATE endpoint when existing record needs change
+            set_fact:
+              record_method: "PUT"
+              record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records/{{ existing_record_id }}"
+            when: existing_record is defined and record_needs_update
 
-    - name: Lookup zone id from Cloudflare for active_domain
-      uri:
-        url: "https://api.cloudflare.com/client/v4/zones?name={{ active_domain }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ cloudflare_api_token }}"
-          Content-Type: "application/json"
-        return_content: true
-      register: zone_lookup
-      when: not dry_run_bool
 
-    - name: Fail if zone not found in Cloudflare
-      fail:
-        msg: "Could not find Cloudflare zone for domain '{{ active_domain }}' (ensure token has permission)."
-      when: not dry_run_bool and (zone_lookup is not defined or zone_lookup.json is not defined or (zone_lookup.json.result | length == 0))
+        ---
+        # Manage Cloudflare DNS record (idempotent, dry-run safe)
 
-    - name: Set zone_id fact
-      set_fact:
-        zone_id: "{{ zone_lookup.json.result[0].id }}"
-      when: not dry_run_bool
+        - name: Set input variables
+          set_fact:
+            active_domain: "{{ survey_domain | default(domain | default('example.com')) }}"
+            effective_record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+            effective_record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+            effective_record_content: "{{ survey_record_value | default(record_value | default('')) }}"
+            effective_record_ttl_raw: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
+            effective_record_proxied_raw: "{{ survey_record_proxied | default(record_proxied | default('')) }}"
 
-    - name: Ensure api_base is set
-      set_fact:
-        api_base: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}"
+        - name: Normalize dry_run to boolean
+          set_fact:
+            dry_run_bool: "{{ (dry_run | default(true) | string | lower) in ['true','1','yes','on'] }}"
 
-    - name: Compute record endpoint
-      set_fact:
-        record_endpoint: "{{ api_base }}/zones/{{ zone_id | default(zone_map[active_domain] | default('ZONE_ID')) }}/dns_records"
-        record_method: "POST"
+        - name: Validate required fields
+          assert:
+            that:
+              - effective_record_type is not none
+              - effective_record_content is not none
+            fail_msg: "record_type and record_value must be provided."
 
-    - name: Lookup existing DNS record for this name/type
-      uri:
-        url: "{{ api_base }}/zones/{{ zone_id }}/dns_records?name={{ effective_record_full_name }}&type={{ effective_record_type }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ cloudflare_api_token }}"
-          Content-Type: "application/json"
-        return_content: true
-      register: existing_record_lookup
-      when: not dry_run_bool
+        - name: Normalize TTL
+          set_fact:
+            effective_record_ttl: "{{ 60 if effective_record_ttl_raw == 'auto' else (effective_record_ttl_raw | int) }}"
 
-    - name: Set existing_record facts when present
-      set_fact:
-        existing_record: "{{ existing_record_lookup.json.result[0] }}"
-        existing_record_id: "{{ existing_record_lookup.json.result[0].id }}"
-      when: not dry_run_bool and (existing_record_lookup.json is defined and (existing_record_lookup.json.result | length) > 0)
+        - name: Normalize proxied flag
+          set_fact:
+            effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
 
-    - name: Determine if record needs update
-      set_fact:
-        record_needs_update: "{{ (existing_record.content != effective_record_content) or (existing_record.ttl | int != (effective_record_ttl | int)) or ((existing_record.proxied | default(false)) != (effective_record_proxied | default(false))) }}"
-      when: existing_record is defined
+        - name: Compute effective_record_full_name
+          set_fact:
+            effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
 
-    - name: Skip apply when existing record already matches desired state
-      set_fact:
-        cloudflare_result: "{{ {'json': {'success': True, 'result': existing_record}, 'status': 200} }}"
-      when: existing_record is defined and not record_needs_update
+        - name: Build record payload
+          set_fact:
+            record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
 
-    - name: Use UPDATE endpoint when existing record needs change
-      set_fact:
-        record_method: "PUT"
-        record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records/{{ existing_record_id }}"
-      when: existing_record is defined and record_needs_update
+        - name: Add proxied flag when provided
+          set_fact:
+            record_payload: "{{ record_payload | combine({'proxied': effective_record_proxied}) }}"
+          when: effective_record_proxied is not none
 
-- name: Apply Cloudflare record change
-  uri:
-    url: "{{ record_endpoint }}"
-    method: "{{ record_method }}"
-    headers:
-      Authorization: "Bearer {{ cloudflare_api_token | default('') }}"
-      Content-Type: "application/json"
-    body_format: json
-    body: "{{ record_payload | to_json }}"
-    return_content: true
-    status_code: [200, 201]
-  register: cloudflare_result
-  when: not dry_run_bool
+        - name: Ensure CLOUDFLARE_API_TOKEN available (prefer extra_var or environment)
+          set_fact:
+            cloudflare_api_token: "{{ cloudflare_api_token | default( lookup('env','CLOUDFLARE_API_TOKEN') | default('') | trim ) }}"
 
-- name: Report Cloudflare response
-  debug:
-    msg:
-      - "Cloudflare response status: {{ cloudflare_result.status | default('none') }}"
-      - "Cloudflare response json: {{ cloudflare_result.json | default(cloudflare_result.content | default({})) }}"
-  when: cloudflare_result is defined
+        - name: Fail if CLOUDFLARE_API_TOKEN missing when not dry_run
+          fail:
+            msg: "CLOUDFLARE_API_TOKEN environment variable is required for mutating operations."
+          when: not dry_run_bool and cloudflare_api_token == ''
 
-- name: Fail if Cloudflare reported an error
-  fail:
-    msg: "Cloudflare API request failed: {{ cloudflare_result.json.errors | default(cloudflare_result.json | default(cloudflare_result.content)) }}"
-  when: cloudflare_result is defined and not (cloudflare_result.json.success | default(false) | bool)
+        - name: Ensure api_base is set
+          set_fact:
+            api_base: "{{ api_base | default('https://api.cloudflare.com/client/v4') }}"
+
+        - name: Infer active_domain from full record name when not provided
+          set_fact:
+            active_domain: "{{ (effective_record_name | regex_replace('^[^.]+\.(.*)$','\1')) }}"
+          when:
+            - active_domain | default('') == ''
+            - effective_record_name is defined
+            - effective_record_name | regex_search('\.')
+
+        - name: Lookup zone id from Cloudflare for active_domain
+          uri:
+            url: "{{ api_base }}/zones?name={{ active_domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ cloudflare_api_token }}"
+              Content-Type: "application/json"
+            return_content: true
+          register: zone_lookup
+          when: not dry_run_bool
+
+        - name: Fail if zone not found in Cloudflare
+          fail:
+            msg: "Could not find Cloudflare zone for domain '{{ active_domain }}' (ensure token has permission)."
+          when: not dry_run_bool and (zone_lookup is not defined or zone_lookup.json is not defined or (zone_lookup.json.result | length == 0))
+
+        - name: Set zone_id fact
+          set_fact:
+            zone_id: "{{ zone_lookup.json.result[0].id }}"
+          when: not dry_run_bool
+
+        - name: Compute record endpoint and default method
+          set_fact:
+            record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records"
+            record_method: "POST"
+          when: zone_id is defined
+
+        - name: Lookup existing DNS record for this name/type
+          uri:
+            url: "{{ api_base }}/zones/{{ zone_id }}/dns_records?name={{ effective_record_full_name }}&type={{ effective_record_type }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ cloudflare_api_token }}"
+              Content-Type: "application/json"
+            return_content: true
+          register: existing_record_lookup
+          when: not dry_run_bool and zone_id is defined
+
+        - name: Set existing_record facts when present
+          set_fact:
+            existing_record: "{{ existing_record_lookup.json.result[0] | default(omit) }}"
+            existing_record_id: "{{ existing_record_lookup.json.result[0].id | default(omit) }}"
+          when: existing_record_lookup is defined and (existing_record_lookup.json.result | length > 0)
+
+        - name: Determine if record needs update
+          set_fact:
+            record_needs_update: "{{ (existing_record.content != effective_record_content) or (existing_record.ttl | int != (effective_record_ttl | int)) or ((existing_record.proxied | default(false)) != (effective_record_proxied | default(false))) }}"
+          when: existing_record is defined
+
+        - name: Skip apply when existing record already matches desired state
+          set_fact:
+            cloudflare_result: "{{ {'json': {'success': True, 'result': existing_record}, 'status': 200} }}"
+          when: existing_record is defined and (record_needs_update is not defined or not record_needs_update)
+
+        - name: Use UPDATE endpoint when existing record needs change
+          set_fact:
+            record_method: "PUT"
+            record_endpoint: "{{ api_base }}/zones/{{ zone_id }}/dns_records/{{ existing_record_id }}"
+          when: existing_record is defined and record_needs_update
+
+        - name: Apply Cloudflare record change
+          uri:
+            url: "{{ record_endpoint }}"
+            method: "{{ record_method }}"
+            headers:
+              Authorization: "Bearer {{ cloudflare_api_token | default('') }}"
+              Content-Type: "application/json"
+            body_format: json
+            body: "{{ record_payload | to_json }}"
+            return_content: true
+            status_code: [200, 201]
+          register: cloudflare_result
+          when: not dry_run_bool and record_endpoint is defined
+
+        - name: Report Cloudflare response
+          debug:
+            msg:
+              - "Cloudflare response status: {{ cloudflare_result.status | default('none') }}"
+              - "Cloudflare response json: {{ cloudflare_result.json | default(cloudflare_result.content | default({})) }}"
+          when: cloudflare_result is defined
+
+        - name: Fail if Cloudflare reported an error
+          fail:
+            msg: "Cloudflare API request failed: {{ cloudflare_result.json.errors | default(cloudflare_result.json | default(cloudflare_result.content)) }}"
+          when: cloudflare_result is defined and not (cloudflare_result.json.success | default(false) | bool)
 
