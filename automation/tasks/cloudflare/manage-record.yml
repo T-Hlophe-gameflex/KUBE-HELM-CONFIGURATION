@@ -28,9 +28,8 @@
 - name: Normalize proxied flag
   set_fact:
     effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
-
-- name: Build record payload
-  # compute a safe, simple full name for the record to avoid complex inline expressions
+  
+# compute a safe, simple full name for the record to avoid complex inline expressions
 - name: Compute effective_record_full_name
   set_fact:
     effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
