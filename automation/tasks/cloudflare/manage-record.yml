@@ -95,12 +95,12 @@
         record_endpoint: "{{ api_base }}/zones/{{ zone_id | default(zone_map[active_domain] | default('ZONE_ID')) }}/dns_records"
         record_method: "POST"
 
-    - name: Dry-run: show planned Cloudflare endpoint
+    - name: "Dry-run: show planned Cloudflare endpoint"
       debug:
         msg: "DRY RUN: would call {{ record_method }} {{ record_endpoint }}"
       when: dry_run_bool
 
-    - name: Dry-run: show planned Cloudflare payload
+    - name: "Dry-run: show planned Cloudflare payload"
       debug:
         msg: "{{ record_payload | to_nice_json }}"
       when: dry_run_bool
