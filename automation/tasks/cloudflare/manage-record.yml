@@ -10,6 +10,9 @@
 - name: Set Cloudflare token and common headers
   set_fact:
     cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
+
+- name: Set Cloudflare common headers
+  set_fact:
     cf_headers_get:
       Authorization: "Bearer {{ cf_token }}"
       Accept: "application/json"
