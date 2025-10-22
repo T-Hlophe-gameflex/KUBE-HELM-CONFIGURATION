@@ -36,11 +36,7 @@
 
 - name: Build record payload
   set_fact:
-    record_payload:
-      type: "{{ effective_record_type }}"
-      name: "{{ effective_record_full_name }}"
-      content: "{{ effective_record_content }}"
-      ttl: {{ effective_record_ttl | int }}
+    record_payload: "{{ {'type': effective_record_type, 'name': effective_record_full_name, 'content': effective_record_content, 'ttl': (effective_record_ttl | int)} }}"
 
 - name: Add proxied flag when provided
   set_fact:
