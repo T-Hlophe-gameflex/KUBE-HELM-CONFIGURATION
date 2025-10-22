@@ -4,10 +4,21 @@
 - name: Normalize inputs
   set_fact:
     dry_run_bool: "{{ (dry_run | default(true)) | bool }}"
-    ttl_num: "{{ (ttl | default(3600)) | int }}"
-    proxied_bool: "{{ (proxied | default(false)) | bool }}"
+    # accept ttl from either 'ttl' or 'record_ttl' (wrapper may set record_ttl)
+    ttl_raw: "{{ (ttl | default(record_ttl | default(None))) }}"
+    proxied_bool: "{{ (proxied | default(record_proxied | default(false))) | bool }}"
 
-- name: Set Cloudflare token and common headers
+- name: Compute numeric ttl (separate task so ttl_raw is available)
+  set_fact:
+    ttl_num: "{{ (ttl_raw is not defined or (ttl_raw | default('') | string | lower) in ['auto','none','']) | ternary(3600, (ttl_raw | int)) }}"
+
+- name: Optionally set dry-run zone when skipping discovery
+  set_fact:
+    cloudflare_zone_name: "{{ domain | default('dry-run-zone') }}"
+    cloudflare_zone_id: "dry-run-zone"
+  when: dry_run_bool and (skip_zone_discovery | default(false))
+
+- name: Set Cloudflare token
   set_fact:
     cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
 
@@ -26,7 +37,7 @@
     that:
       - record_name is defined
       - record_type is defined
-      - record_value is defined
+      - (action == 'delete' or record_value is defined)
     fail_msg: "record_name, record_type and record_value must be provided"
 
 - name: Build fqdn_labels
@@ -61,7 +72,7 @@
   set_fact:
     cloudflare_zone_name: "{{ item.json.result[0].name }}"
     cloudflare_zone_id: "{{ item.json.result[0].id }}"
-  when: item.json is defined and (item.json.result | length) > 0 and cloudflare_zone_id is not defined
+  when: (item.json is defined) and (item.json.result is defined) and ((item.json.result | default([]) | length) > 0) and (cloudflare_zone_id is not defined)
   loop: "{{ zone_tries.results }}"
   loop_control:
     label: "{{ item._ansible_item_label | default('candidate') }}"
@@ -84,22 +95,26 @@
 - name: Set existing_record fact when present
   set_fact:
     existing_record: "{{ existing_record_query.json.result[0] }}"
-  when: existing_record_query.json is defined and (existing_record_query.json.result | length) > 0
+  when: existing_record_query.json is defined and (existing_record_query.json.result is defined) and (existing_record_query.json.result | default([]) | length) > 0
 
 - name: Build desired payload
   set_fact:
     desired_payload:
       type: "{{ record_type }}"
-      name: "{{ record_name }}"
+      name: "{{ (record_name | lower) }}"
       content: "{{ record_value }}"
-      # keep the fact as a templated value, but ensure we coerce to int when sending
       ttl: "{{ ttl_num }}"
       proxied: "{{ proxied_bool }}"
 
 - name: Determine whether existing record matches desired state
   set_fact:
     record_matches: >-
-      {{ (existing_record is defined) and (existing_record.type == desired_payload.type) and (existing_record.name == desired_payload.name) and ((existing_record.content | string) == (desired_payload.content | string)) and ((existing_record.ttl | int) == (desired_payload.ttl | int)) and ((existing_record.proxied | default(false)) == (desired_payload.proxied | default(false))) }}
+      {{ (existing_record is defined)
+         and (existing_record.type == desired_payload.type)
+         and ((existing_record.name | lower) == (desired_payload.name | lower))
+         and ((existing_record.content | string) == (desired_payload.content | string))
+         and ((existing_record.ttl | int) == (desired_payload.ttl | int))
+         and ((existing_record.proxied | default(false)) == (desired_payload.proxied | default(false))) }}
 
 - name: Nothing to do - record matches desired state
   debug:
@@ -110,6 +125,37 @@
   debug:
     msg: "DRY-RUN: desired_payload={{ desired_payload }}"
   when: (not (record_matches | bool)) and dry_run_bool
+
+- name: Handle delete action (dry-run shows what would be removed)
+  block:
+    - name: DRY RUN - delete planned
+      debug:
+        msg: "DRY-RUN: Would delete record {{ existing_record.id }} ({{ existing_record.name }})"
+      when: dry_run_bool
+
+    - name: Ensure CLOUDFLARE_API_TOKEN is present for delete
+      ansible.builtin.assert:
+        that:
+          - "cf_token != ''"
+        fail_msg: "CLOUDFLARE_API_TOKEN must be present in the runner environment to perform mutating operations"
+      when: not dry_run_bool
+
+    - name: Delete existing record (apply)
+      ansible.builtin.uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ existing_record.id }}"
+        method: DELETE
+        headers: "{{ cf_headers_mutate }}"
+        status_code: 200
+        return_content: yes
+        validate_certs: yes
+      register: delete_result
+      when: (existing_record is defined) and (not dry_run_bool)
+
+    - name: Show delete response
+      debug:
+        msg: "DELETE_RESPONSE={{ delete_result.json | default('none') }}"
+      when: delete_result is defined
+  when: action == 'delete'
 
 - name: Ensure CLOUDFLARE_API_TOKEN is present for apply
   ansible.builtin.assert:
@@ -123,7 +169,6 @@
     url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ existing_record.id }}"
     method: PUT
     headers: "{{ cf_headers_mutate }}"
-    # ensure ttl is a number in the JSON payload
     body: "{{ desired_payload | combine({'ttl': (ttl_num | int)}) | to_json }}"
     status_code: 200
     return_content: yes
@@ -136,7 +181,6 @@
     url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
     method: POST
     headers: "{{ cf_headers_mutate }}"
-    # ensure ttl is a number in the JSON payload
     body: "{{ desired_payload | combine({'ttl': (ttl_num | int)}) | to_json }}"
     status_code: 200
     return_content: yes
