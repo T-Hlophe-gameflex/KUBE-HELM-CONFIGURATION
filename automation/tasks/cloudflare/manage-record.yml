@@ -21,32 +21,31 @@
     candidates: >-
       {{ [ (fqdn_labels[-i:] | join('.')) for i in range(2, (fqdn_labels | length) + 1) ] }}
 
-- name: Discover Cloudflare zone id (try candidates)
+- name: Query Cloudflare for candidate zones
   vars:
     cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
-  block:
-    - name: Query Cloudflare for candidate {{ item }}
-      ansible.builtin.uri:
-        url: "https://api.cloudflare.com/client/v4/zones?name={{ item }}&per_page=1"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ cf_token }}"
-          Accept: "application/json"
-        return_content: yes
-        validate_certs: yes
-      register: zone_try
-      failed_when: false
-
-    - name: Set discovered zone facts when found
-      set_fact:
-        cloudflare_zone_name: "{{ item }}"
-        cloudflare_zone_id: "{{ zone_try.json.result[0].id }}"
-      when: zone_try.json is defined and (zone_try.json.result | length) > 0
-
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ item }}&per_page=1"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_token }}"
+      Accept: "application/json"
+    return_content: yes
+    validate_certs: yes
+  register: zone_tries
+  failed_when: false
   loop: "{{ candidates }}"
   loop_control:
     label: "{{ item }}"
-  when: cloudflare_zone_id is not defined
+
+- name: Set discovered zone facts when found (first match)
+  set_fact:
+    cloudflare_zone_name: "{{ item.json.result[0].name }}"
+    cloudflare_zone_id: "{{ item.json.result[0].id }}"
+  when: item.json is defined and (item.json.result | length) > 0 and cloudflare_zone_id is not defined
+  loop: "{{ zone_tries.results }}"
+  loop_control:
+    label: "{{ item._ansible_item_label | default('candidate') }}"
 
 - name: Fail when zone not found
   fail:
