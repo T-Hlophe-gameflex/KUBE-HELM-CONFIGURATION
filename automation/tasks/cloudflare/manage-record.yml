@@ -128,10 +128,15 @@
 
 - name: Handle delete action (dry-run shows what would be removed)
   block:
-    - name: DRY RUN - delete planned
+    - name: DRY RUN - delete planned when record exists
       debug:
         msg: "DRY-RUN: Would delete record {{ existing_record.id }} ({{ existing_record.name }})"
-      when: dry_run_bool
+      when: dry_run_bool and (existing_record is defined)
+
+    - name: DRY RUN - delete planned when no record found
+      debug:
+        msg: "DRY-RUN: No existing record found for {{ record_name }}; nothing to delete."
+      when: dry_run_bool and (existing_record is not defined)
 
     - name: Ensure CLOUDFLARE_API_TOKEN is present for delete
       ansible.builtin.assert:
