@@ -1,5 +1,6 @@
 ---
 - hosts: localhost
+  connection: local
   gather_facts: false
 
   tasks:
@@ -15,6 +16,19 @@
 
     - name: Include manage-record tasks
       include_tasks: ../../tasks/cloudflare/manage-record.yml
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
