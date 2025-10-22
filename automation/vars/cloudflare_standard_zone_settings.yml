@@ -1,0 +1,11 @@
+# Standard zone settings to be applied per domain (domain-standardize.yml consumes this)
+standard_zone_settings:
+  argo: "true"
+  ssl: "full"
+  tls_1_3: "on"
+  always_use_https: "on"
+  automatic_https_rewrites: "on"
+  browser_cache_ttl: 14400
+  cache_level: "standard"
+  ipv6: "on"
+  http2: "on"

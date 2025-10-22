@@ -1,0 +1,29 @@
+---
+# Naming helper for DNS records
+# Inputs (expected as extra_vars or facts):
+#   naming_pattern: one of [legacy, new, mixed, special, direct]
+#   env: environment short code (e.g., p, s, t, g, NNN)
+#   num: numeric id (e.g., 001)
+#   service: service name (e.g., api, web)
+#   name: freeform name when using special/direct patterns
+
+- name: Build naming suggestion from pattern
+  set_fact:
+    naming_suggestion: >-
+      {{ (
+         (naming_pattern == 'legacy') | ternary(('game-flex-' ~ env ~ num),
+         (naming_pattern == 'new')     | ternary((env ~ num ~ '-' ~ service),
+         (naming_pattern == 'mixed')   | ternary((service ~ '-' ~ env ~ num),
+         (naming_pattern == 'special') | ternary((name ~ '-' ~ service),
+         (naming_pattern == 'direct')  | ternary(name,
+         (env ~ num ~ '-' ~ service)
+       ))))) }}
+
+- name: Normalize naming suggestion to lowercase and set record_name
+  set_fact:
+    suggested_record_name: "{{ naming_suggestion | lower }}"
+    record_name: "{{ suggested_record_name }}"
+
+- name: Show naming suggestion
+  debug:
+    msg: "Suggested record name: {{ suggested_record_name }}"
