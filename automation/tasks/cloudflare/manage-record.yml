@@ -30,11 +30,13 @@
     effective_record_proxied: "{{ None if (effective_record_proxied_raw is undefined or effective_record_proxied_raw == '') else ((effective_record_proxied_raw | string | lower) in ['true','yes','1','on']) }}"
 
 - name: Build record payload
+  # compute a safe, simple full name for the record to avoid complex inline expressions
+- name: Compute effective_record_full_name
   set_fact:
-    # compute a safe, simple full name for the record to avoid complex inline expressions
-    effective_record_full_name: "{{ effective_record_name if (effective_record_name is defined and effective_record_name != '') and effective_record_name != '@' else active_domain }}"
+    effective_record_full_name: "{{ (effective_record_name | default('') | trim != '' and effective_record_name != '@') | ternary(effective_record_name, active_domain) }}"
 
-    # create payload as a proper YAML mapping to avoid compact-mapping issues
+- name: Build record payload
+  set_fact:
     record_payload:
       type: "{{ effective_record_type }}"
       name: "{{ effective_record_full_name }}"
