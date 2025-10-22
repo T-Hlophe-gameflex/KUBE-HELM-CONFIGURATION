@@ -7,6 +7,17 @@
     ttl_num: "{{ (ttl | default(3600)) | int }}"
     proxied_bool: "{{ (proxied | default(false)) | bool }}"
 
+- name: Set Cloudflare token and common headers
+  set_fact:
+    cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
+    cf_headers_get:
+      Authorization: "Bearer {{ cf_token }}"
+      Accept: "application/json"
+    cf_headers_mutate:
+      Authorization: "Bearer {{ cf_token }}"
+      Accept: "application/json"
+      Content-Type: "application/json"
+
 - name: Require core parameters
   ansible.builtin.assert:
     that:
@@ -31,14 +42,10 @@
     label: "{{ item }}"
 
 - name: Query Cloudflare for candidate zones
-  vars:
-    cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
   ansible.builtin.uri:
     url: "https://api.cloudflare.com/client/v4/zones?name={{ item }}&per_page=1"
     method: GET
-    headers:
-      Authorization: "Bearer {{ cf_token }}"
-      Accept: "application/json"
+    headers: "{{ cf_headers_get }}"
     return_content: yes
     validate_certs: yes
   register: zone_tries
@@ -65,9 +72,7 @@
   ansible.builtin.uri:
     url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}&per_page=1"
     method: GET
-    headers:
-      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
-      Accept: "application/json"
+    headers: "{{ cf_headers_get }}"
     return_content: yes
     validate_certs: yes
   register: existing_record_query
@@ -105,7 +110,7 @@
 - name: Ensure CLOUDFLARE_API_TOKEN is present for apply
   ansible.builtin.assert:
     that:
-      - "(lookup('env','CLOUDFLARE_API_TOKEN') | default('')) != ''"
+      - "cf_token != ''"
     fail_msg: "CLOUDFLARE_API_TOKEN must be present in the runner environment to perform mutating operations"
   when: not dry_run_bool
 
@@ -113,10 +118,7 @@
   ansible.builtin.uri:
     url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ existing_record.id }}"
     method: PUT
-    headers:
-      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-      Content-Type: "application/json"
-      Accept: "application/json"
+    headers: "{{ cf_headers_mutate }}"
     body: "{{ desired_payload | to_json }}"
     status_code: 200
     return_content: yes
@@ -128,10 +130,7 @@
   ansible.builtin.uri:
     url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
     method: POST
-    headers:
-      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-      Content-Type: "application/json"
-      Accept: "application/json"
+    headers: "{{ cf_headers_mutate }}"
     body: "{{ desired_payload | to_json }}"
     status_code: 200
     return_content: yes
