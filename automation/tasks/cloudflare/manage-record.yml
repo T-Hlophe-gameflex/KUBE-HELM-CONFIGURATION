@@ -22,18 +22,12 @@
   set_fact:
     cf_validate_certs: "{{ not ((skip_ssl_verify | default(lookup('env','SKIP_SSL_VERIFY') | default('false'))) | bool) }}"
 
-- name: Determine whether to auto-skip zone discovery for local dry-run
+- name: Auto-skip zone discovery during dry-run when no token
   set_fact:
-    # Keep the opt-in flag as a boolean; users can set auto_skip_zone_discovery_for_local_dryrun: true
-    auto_skip_zone_discovery_for_local_dryrun: "{{ auto_skip_zone_discovery_for_local_dryrun | default(false) | bool }}"
-    skip_zone_discovery: "{{ (auto_skip_zone_discovery_for_local_dryrun | default(false) | bool) and dry_run_bool and (cf_token | default('') == '') }}"
-  when: dry_run_bool
-
-- name: Set dry-run dummy zone id when skipping discovery
-  set_fact:
+    skip_zone_discovery: true
     cloudflare_zone_name: "{{ domain | default('dry-run-zone') }}"
     cloudflare_zone_id: "dry-run-zone"
-  when: skip_zone_discovery | default(false)
+  when: dry_run_bool and (cf_token | default('') == '')
 
 - name: Resolve action variable safely (prefer cf_action, fall back to action)
   set_fact:
@@ -57,39 +51,12 @@
       - (resolved_action == 'delete' or record_value is defined)
     fail_msg: "record_name, record_type and record_value must be provided"
 
-- name: Normalize proxied flag for record type
-  set_fact:
-    # Define which record types Cloudflare supports proxying for.
-    # Put the list in a separate task so subsequent expressions can reference it reliably.
-    proxable_types: ['A','AAAA','CNAME']
-
-- name: Normalize proxied flag for record type
-  set_fact:
-    proxied_effective: "{{ (proxied_bool | bool) and ((record_type | default('') | upper) in proxable_types) }}"
-    proxied_forced_false: "{{ (proxied_bool | bool) and not ((record_type | default('') | upper) in proxable_types) }}"
-
-- name: Warn when requested proxied is unsupported for type
-  debug:
-    msg: "Proxied requested (true) but record type {{ record_type }} cannot be proxied; forcing proxied=false for the API call."
-  when: proxied_forced_false
-
 - name: Build fqdn_labels (support single-label + domain)
   set_fact:
-    # Build a full FQDN string. If record_name already contains a dot, use it
-    # as-is; otherwise append the provided domain when available.
-    fqdn_full: >-
-      {{ (record_name | default('')) if ('.' in (record_name | default(''))) else (record_name ~ '.' ~ domain) if (domain is defined and (domain | length) > 0) else (record_name | default('')) }}
-
-- name: Split fqdn_full into labels
-  set_fact:
-    fqdn_labels: "{{ (fqdn_full | default('')).split('.') if (fqdn_full | default('') | length) > 0 else [] }}"
-
-- name: Require domain when record_name is single-label
-  ansible.builtin.assert:
-    that:
-      - "'.' in (record_name | default('')) or (domain is defined and (domain | length) > 0)"
-    fail_msg: "record_name appears to be a single-label name (e.g. 'www'). Please provide 'domain' (survey_domain) or supply a fully-qualified record_name like 'www.example.com'."
-  when: record_name is defined
+    fqdn_labels: >-
+      {{ (record_name | default('')).split('.') if ('.' in (record_name | default(''))) 
+         else ((record_name ~ '.' ~ domain).split('.') if (domain is defined and (domain | length) > 0) 
+               else (record_name | default('')).split('.')) }}
 
 - name: Initialize candidates list
   set_fact:
@@ -116,7 +83,10 @@
     label: "{{ item }}"
 
 
-
+- name: Show zone_tries results (dry-run)
+  debug:
+    msg: "{{ zone_tries.results | default('[]') | to_nice_json }}"
+  when: dry_run_bool
 
 
 - name: Set discovered zone facts when found (first match)
@@ -156,22 +126,7 @@
       name: "{{ (record_name | lower) }}"
       content: "{{ record_value }}"
       ttl: "{{ ttl_num }}"
-      proxied: "{{ proxied_effective }}"
-
-- name: Add MX priority to desired payload when applicable
-  set_fact:
-    desired_payload: "{{ desired_payload | combine({'priority': (record_priority | default('10') | int)}) }}"
-  when: (record_type | default('') | upper) == 'MX'
-
-- name: Validate CNAME content is a hostname (not URL/path or IP)
-  ansible.builtin.assert:
-    that:
-      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content is defined)"
-      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content | regex_search('://') | not)"
-      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content | regex_search('/') | not)"
-      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content | regex_search('^\\d+\\.\\d+\\.\\d+\\.\\d+$') | not)"
-    fail_msg: "Invalid CNAME target '{{ desired_payload.content | default(record_value | default('')) }}'. CNAME content must be a hostname only (no protocol, no path, not an IP). Example: 'target.example.com'"
-  when: (record_type | default('') | upper) == 'CNAME' and (resolved_action | default('') ) != 'delete'
+      proxied: "{{ proxied_bool }}"
 
 - name: Determine whether existing record matches desired state
   set_fact:
