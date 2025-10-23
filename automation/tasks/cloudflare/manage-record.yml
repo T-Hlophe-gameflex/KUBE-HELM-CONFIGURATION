@@ -151,7 +151,7 @@
       name: "{{ (record_name | lower) }}"
       content: "{{ record_value }}"
       ttl: "{{ ttl_num }}"
-  proxied: "{{ proxied_effective }}"
+      proxied: "{{ proxied_effective }}"
 
 - name: Add MX priority to desired payload when applicable
   set_fact:
