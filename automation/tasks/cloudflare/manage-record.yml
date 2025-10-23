@@ -57,6 +57,17 @@
       - (resolved_action == 'delete' or record_value is defined)
     fail_msg: "record_name, record_type and record_value must be provided"
 
+- name: Normalize proxied flag for record type
+  set_fact:
+    proxable_types: ['A','AAAA','CNAME']
+    proxied_effective: "{{ (proxied_bool | bool) and ((record_type | default('') | upper) in proxable_types) }}"
+    proxied_forced_false: "{{ (proxied_bool | bool) and not ((record_type | default('') | upper) in proxable_types) }}"
+
+- name: Warn when requested proxied is unsupported for type
+  debug:
+    msg: "Proxied requested (true) but record type {{ record_type }} cannot be proxied; forcing proxied=false for the API call."
+  when: proxied_forced_false
+
 - name: Build fqdn_labels (support single-label + domain)
   set_fact:
     # Build a full FQDN string. If record_name already contains a dot, use it
@@ -140,7 +151,7 @@
       name: "{{ (record_name | lower) }}"
       content: "{{ record_value }}"
       ttl: "{{ ttl_num }}"
-      proxied: "{{ proxied_bool }}"
+  proxied: "{{ proxied_effective }}"
 
 - name: Add MX priority to desired payload when applicable
   set_fact:
