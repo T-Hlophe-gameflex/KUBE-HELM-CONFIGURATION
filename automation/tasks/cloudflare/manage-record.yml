@@ -12,15 +12,26 @@
   set_fact:
     ttl_num: "{{ (ttl_raw is not defined or (ttl_raw | default('') | string | lower) in ['auto','none','']) | ternary(3600, (ttl_raw | int)) }}"
 
-- name: Optionally set dry-run zone when skipping discovery
-  set_fact:
-    cloudflare_zone_name: "{{ domain | default('dry-run-zone') }}"
-    cloudflare_zone_id: "dry-run-zone"
-  when: dry_run_bool and (skip_zone_discovery | default(false))
+
 
 - name: Set Cloudflare token
   set_fact:
-    cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') }}"
+    cf_token: "{{ resolved_cf_token | default( lookup('env','CLOUDFLARE_API_TOKEN') | default('') ) }}"
+
+- name: Compute cf_validate_certs (allow SKIP_SSL_VERIFY env or skip_ssl_verify var)
+  set_fact:
+    cf_validate_certs: "{{ not ((skip_ssl_verify | default(lookup('env','SKIP_SSL_VERIFY') | default('false'))) | bool) }}"
+
+- name: Auto-skip zone discovery during dry-run when no token
+  set_fact:
+    skip_zone_discovery: true
+    cloudflare_zone_name: "{{ domain | default('dry-run-zone') }}"
+    cloudflare_zone_id: "dry-run-zone"
+  when: dry_run_bool and (cf_token | default('') == '')
+
+- name: Resolve action variable safely (prefer cf_action, fall back to action)
+  set_fact:
+    resolved_action: "{{ (cf_action | default('')) | default(action | default('')) }}"
 
 - name: Set Cloudflare common headers
   set_fact:
@@ -37,12 +48,15 @@
     that:
       - record_name is defined
       - record_type is defined
-      - (action == 'delete' or record_value is defined)
+      - (resolved_action == 'delete' or record_value is defined)
     fail_msg: "record_name, record_type and record_value must be provided"
 
-- name: Build fqdn_labels
+- name: Build fqdn_labels (support single-label + domain)
   set_fact:
-    fqdn_labels: "{{ record_name.split('.') }}"
+    fqdn_labels: >-
+      {{ (record_name | default('')).split('.') if ('.' in (record_name | default(''))) 
+         else ((record_name ~ '.' ~ domain).split('.') if (domain is defined and (domain | length) > 0) 
+               else (record_name | default('')).split('.')) }}
 
 - name: Initialize candidates list
   set_fact:
@@ -61,18 +75,26 @@
     method: GET
     headers: "{{ cf_headers_get }}"
     return_content: yes
-    validate_certs: yes
+    validate_certs: "{{ cf_validate_certs }}"
   register: zone_tries
   failed_when: false
   loop: "{{ candidates }}"
   loop_control:
     label: "{{ item }}"
 
+
+- name: Show zone_tries results (dry-run)
+  debug:
+    msg: "{{ zone_tries.results | default('[]') | to_nice_json }}"
+  when: dry_run_bool
+
+
 - name: Set discovered zone facts when found (first match)
   set_fact:
     cloudflare_zone_name: "{{ item.json.result[0].name }}"
     cloudflare_zone_id: "{{ item.json.result[0].id }}"
   when: (item.json is defined) and (item.json.result is not none) and ((item.json.result | default([]) | length) > 0) and (cloudflare_zone_id is not defined)
+  
   loop: "{{ zone_tries.results }}"
   loop_control:
     label: "{{ item._ansible_item_label | default('candidate') }}"
@@ -88,7 +110,7 @@
     method: GET
     headers: "{{ cf_headers_get }}"
     return_content: yes
-    validate_certs: yes
+    validate_certs: "{{ cf_validate_certs }}"
   register: existing_record_query
   failed_when: false
 
@@ -152,7 +174,7 @@
         headers: "{{ cf_headers_mutate }}"
         status_code: 200
         return_content: yes
-        validate_certs: yes
+        validate_certs: "{{ cf_validate_certs }}"
       register: delete_result
       when: (existing_record is defined) and (not dry_run_bool)
 
@@ -160,14 +182,14 @@
       debug:
         msg: "DELETE_RESPONSE={{ delete_result.json | default('none') }}"
       when: delete_result is defined
-  when: action == 'delete'
+  when: resolved_action == 'delete'
 
 - name: Ensure CLOUDFLARE_API_TOKEN is present for apply
   ansible.builtin.assert:
     that:
       - "cf_token != ''"
     fail_msg: "CLOUDFLARE_API_TOKEN must be present in the runner environment to perform mutating operations"
-  when: not dry_run_bool
+  when: (not dry_run_bool) and (resolved_action != 'delete')
 
 - name: Update existing record (apply)
   ansible.builtin.uri:
@@ -177,9 +199,9 @@
     body: "{{ desired_payload | combine({'ttl': (ttl_num | int)}) | to_json }}"
     status_code: 200
     return_content: yes
-    validate_certs: yes
+    validate_certs: "{{ cf_validate_certs }}"
   register: update_result
-  when: (existing_record is defined) and (not record_matches) and (not dry_run_bool)
+  when: (existing_record is defined) and (not record_matches) and (not dry_run_bool) and (resolved_action != 'delete')
 
 - name: Create record (apply)
   ansible.builtin.uri:
@@ -189,9 +211,9 @@
     body: "{{ desired_payload | combine({'ttl': (ttl_num | int)}) | to_json }}"
     status_code: 200
     return_content: yes
-    validate_certs: yes
+    validate_certs: "{{ cf_validate_certs }}"
   register: create_result
-  when: (existing_record is not defined) and (not dry_run_bool)
+  when: (existing_record is not defined) and (not dry_run_bool) and (resolved_action != 'delete')
 
 - name: Show update API response
   debug:

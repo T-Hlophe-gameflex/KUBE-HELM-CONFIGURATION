@@ -12,13 +12,14 @@
 
 - name: Apply standard settings to each domain
   uri:
-    url: "{{ api_base }}/zones/{{ zone_map[item.0] }}/settings/{{ item.1.key }}"
+    url: "{{ api_base }}/zones/{{ (zone_map[item.0] if zone_map is defined and zone_map[item.0] is defined else lookup('env','CF_ZONE_MAP_' ~ (item.0 | upper) | default(''))) }}/settings/{{ item.1.key }}"
     method: PATCH
     headers: "{{ cloudflare_headers }}"
     body_format: json
     body:
       value: "{{ item.1.value }}"
     return_content: true
+    validate_certs: yes
   register: zone_setting_apply
   loop: "{{ domain_setting_targets }}"
   loop_control:

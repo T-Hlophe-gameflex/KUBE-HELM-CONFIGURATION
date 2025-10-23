@@ -1,0 +1,149 @@
+---
+- name: Bootstrap AWX Cloudflare templates
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    awx_url: "{{ lookup('env','AWX_URL') | default('http://127.0.0.1:8052') }}"
+    awx_token: "{{ lookup('env','AWX_TOKEN') | default('') }}"
+    awx_project_id: "{{ lookup('env','AWX_PROJECT_ID') | default('1') }}"
+    awx_inventory_id: "{{ lookup('env','AWX_INVENTORY_ID') | default('1') }}"
+    cf_credential_id: "{{ lookup('env','CF_CREDENTIAL_ID') | default('') }}"
+
+  tasks:
+    - name: Require AWX_TOKEN
+      ansible.builtin.assert:
+        that:
+          - awx_token != ''
+        fail_msg: "AWX_TOKEN must be set in the environment to run this bootstrap playbook"
+
+    - name: Set AWX headers
+      set_fact:
+        awx_headers:
+          Authorization: "Bearer {{ awx_token }}"
+          Content-Type: "application/json"
+
+    - name: Ensure Manage Domain exists (GET)
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/?name=Manage%20Domain%20(Cloudflare)"
+        method: GET
+        headers: "{{ awx_headers }}"
+        return_content: yes
+      register: jt_check_manage_domain
+      failed_when: false
+
+    - name: Create Manage Domain when missing (POST)
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/"
+        method: POST
+        headers: "{{ awx_headers }}"
+        body: >
+          {
+            "name": "Manage Domain (Cloudflare)",
+            "description": "Manage Cloudflare domain-level settings and records",
+            "job_type": "run",
+            "inventory": {{ awx_inventory_id }},
+            "project": {{ awx_project_id }},
+            "playbook": "automation/playbooks/cloudflare/wrapper-manage-record.yml",
+            "ask_variables_on_launch": false
+          }
+        status_code: 201
+        return_content: yes
+      when: jt_check_manage_domain.json.count|int == 0
+      register: created_manage_domain_response
+      failed_when: false
+
+    - name: Ensure Manage Record exists (GET)
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/?name=Manage%20Record%20(Cloudflare)"
+        method: GET
+        headers: "{{ awx_headers }}"
+        return_content: yes
+      register: jt_check_manage_record
+      failed_when: false
+
+    - name: Create Manage Record when missing (POST)
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/"
+        method: POST
+        headers: "{{ awx_headers }}"
+        body: >
+          {
+            "name": "Manage Record (Cloudflare)",
+            "description": "Create/Update/Delete DNS records",
+            "job_type": "run",
+            "inventory": {{ awx_inventory_id }},
+            "project": {{ awx_project_id }},
+            "playbook": "automation/playbooks/cloudflare/wrapper-manage-record.yml",
+            "ask_variables_on_launch": false
+          }
+        status_code: 201
+        return_content: yes
+      when: jt_check_manage_record.json.count|int == 0
+      register: created_manage_record_response
+      failed_when: false
+
+    - name: Lookup Cloudflare credential by name
+      uri:
+        url: "{{ awx_url }}/api/v2/credentials/?name=Cloudflare%20API%20Token"
+        method: GET
+        headers: "{{ awx_headers }}"
+        return_content: yes
+      register: cred_lookup
+      failed_when: false
+
+    - name: Resolve final credential id
+      set_fact:
+        final_cf_credential_id: >-
+          {{ cf_credential_id if (cf_credential_id != '') else (cred_lookup.json.results[0].id if (cred_lookup.json.count|int) > 0 else '') }}
+
+    - name: Resolve template ids
+      set_fact:
+        manage_record_template_id: >-
+          {{ (jt_check_manage_record.json.results[0].id if (jt_check_manage_record.json.count|int) > 0 else (created_manage_record_response.json.id if (created_manage_record_response is defined) else '')) }}
+        manage_domain_template_id: >-
+          {{ (jt_check_manage_domain.json.results[0].id if (jt_check_manage_domain.json.count|int) > 0 else (created_manage_domain_response.json.id if (created_manage_domain_response is defined) else '')) }}
+
+    - name: Attach credential to Job Templates when available
+      when: final_cf_credential_id is defined and final_cf_credential_id != ''
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/{{ item }}/"
+        method: PATCH
+        headers: "{{ awx_headers }}"
+        body: "{{ {'credential': (final_cf_credential_id|int)} | to_json }}"
+        status_code: 200
+        return_content: yes
+      loop:
+        - "{{ manage_record_template_id }}"
+        - "{{ manage_domain_template_id }}"
+      failed_when: false
+
+    - name: Patch Manage Record to ask for token via survey when credential missing
+      when: final_cf_credential_id == '' or final_cf_credential_id is not defined
+      block:
+        - name: Build minimal CF token survey spec
+          set_fact:
+            minimal_cf_survey:
+              - question_name: "cloudflare_token"
+                question_description: "Provide a Cloudflare API token for this run (optional)"
+                required: false
+                answer_variable_name: "CLOUDFLARE_API_TOKEN"
+                type: "password"
+                choices: []
+
+        - name: Patch Manage Record template with survey
+          uri:
+            url: "{{ awx_url }}/api/v2/job_templates/{{ manage_record_template_id }}/"
+            method: PATCH
+            headers: "{{ awx_headers }}"
+            body: "{{ {'survey_enabled': True, 'survey_spec': minimal_cf_survey} | to_json }}"
+            status_code: 200
+            return_content: yes
+          failed_when: false
+
+    - name: Bootstrap summary
+      debug:
+        msg:
+          - "Manage Record present: {{ (jt_check_manage_record.json.count|int) > 0 or (created_manage_record_response is defined) }}"
+          - "Manage Domain present: {{ (jt_check_manage_domain.json.count|int) > 0 or (created_manage_domain_response is defined) }}"
+          - "CF credential attached: {{ final_cf_credential_id is defined and final_cf_credential_id != '' }}"

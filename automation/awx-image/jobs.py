@@ -318,6 +318,22 @@ class BaseTask(object):
             # maintain a list of host_name --> host_id
             # so we can associate emitted events to Host objects
             self.runner_callback.host_map[hostname] = hv.get('remote_tower_id', '')
+        # Normalize inventory shape: some dynamic inventory sources may emit
+        # group entries where 'hosts' is a list. Ansible expects group 'hosts'
+        # to be a mapping (dict). Walk all top-level groups and convert.
+        try:
+            for group_name, group_val in list(script_data.items()):
+                if not isinstance(group_val, dict):
+                    continue
+                hosts = group_val.get('hosts')
+                if isinstance(hosts, list):
+                    # Convert list of hostnames into mapping form {host: {}}
+                    normalized_hosts = {h: {} for h in hosts}
+                    script_data.setdefault(group_name, {})['hosts'] = normalized_hosts
+                    logger.info('AWX_PATCH: normalized %s.hosts list -> dict with %d hosts', group_name, len(normalized_hosts))
+        except Exception:
+            logger.exception('AWX_PATCH: error while normalizing inventory hosts')
+
         # Write stable JSON inventory instead of a python wrapper script to avoid
         # newline/concatenation issues observed in certain environments.
         json_text = json.dumps(script_data, ensure_ascii=False) + "\n"
@@ -328,6 +344,12 @@ class BaseTask(object):
                 _f.write(f"written:{inv_id if inv_id is not None else 'unknown'}\n")
         except Exception:
             pass
+        # Also attempt to write the raw JSON to /tmp for offline inspection.
+        try:
+            with open('/tmp/awx_inventory_dump.json', 'w') as _dump:
+                _dump.write(json_text)
+        except Exception:
+            logger.exception('AWX_PATCH: failed to write /tmp/awx_inventory_dump.json')
         logger.info('AWX_PATCH: write_inventory_file writing JSON inventory')
         return self.write_private_data_file(private_data_dir, file_name, json_text, sub_dir='inventory', file_permissions=0o644)
     def build_inventory(self, instance, private_data_dir):

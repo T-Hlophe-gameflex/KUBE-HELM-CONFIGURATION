@@ -1,0 +1,42 @@
+Script started on Wed Oct 22 09:27:56 2025
+[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                                                                                    [0m[27m[24m[Jthami.hlophe@GGZATHAHLOMAC awx-image % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                                                                                    [0m[27m[24m[Jthami.hlophe@GGZATHAHLOMAC awx-image % [K[?2004hbbash -lc 'set -euo pipefail[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## prepare local payload for token[?2004l
+[0m[27m[24m[Jquote> [K[?2004hccat > /tmp/payload_token.json <<'JSON'[?2004l
+[0m[27m[24m[Jquote> [K[?2004h{{"description":"ephemeral-debug-token"}[?2004l
+[0m[27m[24m[Jquote> [K[?2004hJJSON[?2004l
+[0m[27m[24m[Jquote> [K[?2004hAADMIN_PASS=$(kubectl -n awx get secret ansible-awx-admin-password -o jsonpath="{.data.password}" | base64 -d)[?2004l
+[0m[27m[24m[Jquote> [K[?2004hWWEB_POD=$(kubectl -n awx get pods -l app.kubernetes.io/name=ansible-awx-web -o jsonpath="{.items[0].metadata.name}")[?2004l
+[0m[27m[24m[Jquote> [K[?2004heecho "web_pod=$WEB_POD"[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## copy payload into pod[?2004l
+[0m[27m[24m[Jquote> [K[?2004hkkubectl -n awx cp /tmp/payload_token.json ${WEB_POD}:/tmp/payload_token.json[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## create token[?2004l
+[0m[27m[24m[Jquote> [K[?2004hTTOKEN_JSON=$(kubectl -n awx exec ${WEB_POD} -- sh -c "curl -s -u admin:${ADMIN_PASS} -H 'Content-Type: application/json' -X POST 'http://127.0.0.1:8052/api/v2/tokens/' -d @/tmp/payload_token.json")[?2004l
+[0m[27m[24m[Jquote> [K[?2004heecho "token_json=$TOKEN_JSON"[?2004l
+[0m[27m[24m[Jquote> [K[?2004hTTOKEN=$(echo "$TOKEN_JSON" | jq -r .token)[?2004l
+[0m[27m[24m[Jquote> [K[?2004heecho "token=$TOKEN"[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## prepare launch payload[?2004l
+[0m[27m[24m[Jquote> [K[?2004heecho '{}' > /tmp/payload_launch.json[?2004l
+[0m[27m[24m[Jquote> [K[?2004hkkubectl -n awx cp /tmp/payload_launch.json ${WEB_POD}:/tmp/payload_launch.json[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## launch job template 15[?2004l
+[0m[27m[24m[Jquote> [K[?2004hLLAUNCH_JSON=$(kubectl -n awx exec ${WEB_POD} -- sh -c "curl -s -H 'Authorization: Bearer ${TOKEN}' -H 'Content-Type: application/json' -X POST 'http://127.0.0.1:8052/api/v2/job_templates/15/launch/' -d @/tmp/payload_launch.json")[?2004l
+[0m[27m[24m[Jquote> [K[?2004heecho "launch_response=$LAUNCH_JSON"[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## identify latest task pod[?2004l
+[0m[27m[24m[Jquote> [K[?2004hTTASK_POD=$(kubectl -n awx get pods --no-headers | awk '/^ansible-awx-task-/{print $1; exit}')[?2004l
+[0m[27m[24m[Jquote> [K[?2004heecho "task_pod=$TASK_POD"[?2004l
+[0m[27m[24m[Jquote> [K[?2004h## poll for dump up to 60s[?2004l
+[0m[27m[24m[Jquote> [K[?2004hffor i in $(seq 1 12); do[?2004l
+[0m[27m[24m[Jquote> [K[?2004h   echo "try $i"[?2004l
+[0m[27m[24m[Jquote> [K[?2004h   if kubectl -n awx exec ${TASK_POD} -- sh -c 'if [ -f /tmp/awx_inventory_dump.json ]; then cat /tmp/awx_inventory_dump.json; exit 0; else exit 1; fi' > /tmp/awx_dump.json 2>/dev/null; then[?2004l
+zsh: parse error near `then'
+[1m[7m%[27m[1m[0m                                                                                                                                                                                                                                                                                                    [0m[27m[24m[Jthami.hlophe@GGZATHAHLOMAC awx-image % [K[?2004h     echo "FOUND DUMP:"; cat /tmp/awx_dump.json; exit 0[?2004l
+FOUND DUMP:
+  fi
+  sleep 5
+done
+
+echo "No dump found after polling"
+'
+cat: /tmp/awx_dump.json: No such file or directory
+
+Script done on Wed Oct 22 09:41:27 2025

@@ -30,7 +30,8 @@ This folder contains dynamic Ansible playbooks for AWX job templates to manage C
 Configure AWX Job Template surveys to collect these variables:
 
 - `survey_domain`: Target domain/zone (dropdown)
-- `survey_action`: Action (`manage`, `standardize`, `sync`, `create`, `update`, `delete`)
+- `survey_action`: Action (`manage`, `standardize`, `sync`, `create`, `update`, `delete`) (mapped to `cf_action` at runtime)
+  - NOTE: AWX surveys and survey-generator scripts now use `cf_action` as the survey variable (previously `survey_action`/`action`). Wrappers map the survey value into `cf_action` and the tasks use `resolved_action` for backwards compatibility.
 - `survey_record_name`: Record name (text)
 - `survey_record_type`: Record type (A, CNAME, TXT, etc)
 - `survey_record_value`: Record content

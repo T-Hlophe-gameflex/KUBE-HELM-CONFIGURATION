@@ -3,7 +3,54 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars_files:
+    - defaults.yml
   tasks:
+    - name: Normalize runner inventory file if necessary
+      block:
+        - name: Ensure AWX_PRIVATE_DATA_DIR is set
+          set_fact:
+            awx_pdd: "{{ lookup('env','AWX_PRIVATE_DATA_DIR') | default('') }}"
+
+        - name: Read runner inventory file if present
+          slurp:
+            src: "{{ awx_pdd }}/inventory/hosts"
+          register: raw_inventory
+          when: awx_pdd != ''
+
+        - name: Normalize JSON inventory (convert all.hosts list -> dict)
+          when: raw_inventory is defined and raw_inventory.content is defined
+          block:
+            - name: Decode inventory content
+              set_fact:
+                inventory_text: "{{ raw_inventory.content | b64decode }}"
+
+            - name: Attempt JSON normalization and rewrite file
+              copy:
+                content: "{{ (inventory_text | from_json | combine({})) | to_nice_json }}"
+                dest: "{{ awx_pdd }}/inventory/hosts"
+                remote_src: false
+              when: "(inventory_text | from_json).get('all', {}).get('hosts') is iterable and (inventory_text | from_json).get('all', {}).get('hosts') is not mapping"
+      rescue:
+        - debug:
+            msg: "Could not normalize inventory or inventory not present yet"
+
+    - name: Wait for runner inventory file to appear
+      wait_for:
+        path: "{{ lookup('env','AWX_PRIVATE_DATA_DIR') | default('') }}/inventory/hosts"
+        timeout: 300
+      when: lookup('env','AWX_PRIVATE_DATA_DIR') is defined and lookup('env','AWX_PRIVATE_DATA_DIR') != ''
+
+    - name: Print runner inventory to job stdout for capture
+      shell: |
+        cat "{{ lookup('env','AWX_PRIVATE_DATA_DIR') | default('') }}/inventory/hosts" || true
+      register: runner_inventory
+      failed_when: false
+
+    - name: Show runner inventory in stdout (truncated)
+      debug:
+        msg: "{{ runner_inventory.stdout[:4096] }}"
+
     - name: Snapshot runner inventory to /tmp for inspection (Ansible copy)
       block:
         - name: Determine AWX private data dir from env

@@ -5,7 +5,7 @@
     - name: Map survey variables -> playbook variables
       set_fact:
         domain: "{{ survey_domain | default(domain | default('')) }}"
-        action: "{{ survey_action | default(action | default('')) }}"
+        cf_action: "{{ survey_action | default(cf_action | default('')) }}"
 
     - include_tasks: ../../tasks/cloudflare/domain-standardize.yml
 ---

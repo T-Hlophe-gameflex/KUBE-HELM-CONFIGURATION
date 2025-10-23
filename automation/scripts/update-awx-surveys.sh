@@ -90,7 +90,7 @@ read -r -d '' SURVEY_SPEC <<EOF || true
       "max": 1
     },
     {
-      "variable": "survey_action",
+      "variable": "cf_action",
       "question_name": "Action",
       "question_description": "Select action",
       "type": "multiplechoice",
@@ -101,7 +101,7 @@ read -r -d '' SURVEY_SPEC <<EOF || true
       "max": 1
     },
     {
-      "variable": "survey_record_name",
+      "variable": "record_name",
       "question_name": "Record name",
       "question_description": "Record name (e.g. www)",
       "type": "text",
@@ -111,7 +111,7 @@ read -r -d '' SURVEY_SPEC <<EOF || true
       "max": 128
     },
     {
-      "variable": "survey_record_type",
+      "variable": "record_type",
       "question_name": "Record type",
       "question_description": "A/CNAME/TXT",
       "type": "multiplechoice",
@@ -122,7 +122,7 @@ read -r -d '' SURVEY_SPEC <<EOF || true
       "max": 1
     },
     {
-      "variable": "survey_record_value",
+      "variable": "record_value",
       "question_name": "Record value",
       "question_description": "Record content/IP",
       "type": "text",
@@ -132,7 +132,7 @@ read -r -d '' SURVEY_SPEC <<EOF || true
       "max": 256
     },
     {
-      "variable": "survey_record_ttl",
+      "variable": "record_ttl",
       "question_name": "TTL",
       "question_description": "TTL seconds or \"auto\"",
       "type": "text",
@@ -142,11 +142,23 @@ read -r -d '' SURVEY_SPEC <<EOF || true
       "max": 64
     },
     {
-      "variable": "survey_record_proxied",
+      "variable": "record_proxied",
       "question_name": "Proxied",
       "question_description": "Proxy via Cloudflare",
       "type": "multiplechoice",
   "choices": "$PROXIED_CHOICES_ESCAPED",
+      "default": "false",
+      "required": false,
+      "min": 0,
+      "max": 1
+    }
+    ,
+    {
+      "variable": "dry_run",
+      "question_name": "Dry run",
+      "question_description": "Set to true to perform a dry-run; false to apply",
+      "type": "multiplechoice",
+      "choices": "true\\nfalse",
       "default": "false",
       "required": false,
       "min": 0,
