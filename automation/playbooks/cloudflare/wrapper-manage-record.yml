@@ -13,6 +13,7 @@
         record_value: "{{ survey_record_value | default(record_value | default('')) }}"
         record_ttl: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
         record_proxied: "{{ survey_record_proxied | default(record_proxied | default('false')) }}"
+        record_priority: "{{ survey_record_priority | default(record_priority | default('')) }}"
 
     - name: Resolve Cloudflare token (env preferred, then survey/password)
       set_fact:

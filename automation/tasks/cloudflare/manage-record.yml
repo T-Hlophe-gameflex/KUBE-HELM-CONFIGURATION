@@ -142,6 +142,11 @@
       ttl: "{{ ttl_num }}"
       proxied: "{{ proxied_bool }}"
 
+- name: Add MX priority to desired payload when applicable
+  set_fact:
+    desired_payload: "{{ desired_payload | combine({'priority': (record_priority | default('10') | int)}) }}"
+  when: (record_type | default('') | upper) == 'MX'
+
 - name: Determine whether existing record matches desired state
   set_fact:
     record_matches: >-
