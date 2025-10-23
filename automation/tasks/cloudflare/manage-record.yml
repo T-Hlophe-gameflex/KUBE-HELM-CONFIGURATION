@@ -59,10 +59,25 @@
 
 - name: Build fqdn_labels (support single-label + domain)
   set_fact:
-    fqdn_labels: >-
-      {{ (record_name | default('')).split('.') if ('.' in (record_name | default(''))) 
-         else ((record_name ~ '.' ~ domain).split('.') if (domain is defined and (domain | length) > 0) 
-               else (record_name | default('')).split('.')) }}
+    # Build a full FQDN string. If record_name already contains a dot, use it
+    # as-is; otherwise append the provided domain when available.
+    fqdn_full: >-
+      {{ (record_name | default('')) if ('.' in (record_name | default(''))) else (record_name ~ '.' ~ domain) if (domain is defined and (domain | length) > 0) else (record_name | default('')) }}
+
+- name: Split fqdn_full into labels
+  set_fact:
+    fqdn_labels: "{{ (fqdn_full | default('')).split('.') if (fqdn_full | default('') | length) > 0 else [] }}"
+
+- name: DEBUG: show fqdn_full and fqdn_labels
+  debug:
+    msg: "fqdn_full={{ fqdn_full | default('') }} fqdn_labels={{ fqdn_labels | default([]) }}"
+
+- name: Require domain when record_name is single-label
+  ansible.builtin.assert:
+    that:
+      - "'.' in (record_name | default('')) or (domain is defined and (domain | length) > 0)"
+    fail_msg: "record_name appears to be a single-label name (e.g. 'www'). Please provide 'domain' (survey_domain) or supply a fully-qualified record_name like 'www.example.com'."
+  when: record_name is defined
 
 - name: Initialize candidates list
   set_fact:
