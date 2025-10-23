@@ -8,13 +8,3 @@
         cf_action: "{{ survey_action | default(cf_action | default('')) }}"
 
     - include_tasks: ../../tasks/cloudflare/domain-standardize.yml
----
-- hosts: localhost
-  gather_facts: false
-  tasks:
-    - include_tasks: ../../tasks/cloudflare/domain-standardize.yml
----
-- hosts: localhost
-  gather_facts: false
-  tasks:
-    - include_tasks: ../../tasks/cloudflare/domain-standardize.yml
