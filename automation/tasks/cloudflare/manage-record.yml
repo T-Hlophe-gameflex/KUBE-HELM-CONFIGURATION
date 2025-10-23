@@ -59,7 +59,12 @@
 
 - name: Normalize proxied flag for record type
   set_fact:
+    # Define which record types Cloudflare supports proxying for.
+    # Put the list in a separate task so subsequent expressions can reference it reliably.
     proxable_types: ['A','AAAA','CNAME']
+
+- name: Normalize proxied flag for record type
+  set_fact:
     proxied_effective: "{{ (proxied_bool | bool) and ((record_type | default('') | upper) in proxable_types) }}"
     proxied_forced_false: "{{ (proxied_bool | bool) and not ((record_type | default('') | upper) in proxable_types) }}"
 
