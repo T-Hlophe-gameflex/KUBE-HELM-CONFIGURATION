@@ -41,5 +41,5 @@
       domain: "{{ zone_result.item.0 }}"
       setting: "{{ zone_result.item.1.key }}"
       value: "{{ zone_result.item.1.value }}"
-      status: {{ zone_result.json.success | default(false) | bool }}
+      status: "{{ zone_result.json.success | default(false) | bool }}"
   when: zone_setting_apply is defined
