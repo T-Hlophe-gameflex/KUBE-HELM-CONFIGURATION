@@ -1,22 +1,7 @@
 ---
----
-- name: Bootstrap AWX Cloudflare templates
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  vars:
-    awx_url: "{{ lookup('env','AWX_URL') | default('http://127.0.0.1:8052') }}"
-    awx_token: "{{ lookup('env','AWX_TOKEN') | default('') }}"
-    awx_project_id: "{{ lookup('env','AWX_PROJECT_ID') | default('1') }}"
-    awx_inventory_id: "{{ lookup('env','AWX_INVENTORY_ID') | default('1') }}"
-    cf_credential_id: "{{ lookup('env','CF_CREDENTIAL_ID') | default('') }}"
-
-  tasks:
-    - name: Assert AWX_TOKEN provided
-      ansible.builtin.assert:
-        that:
-          - awx_token != ''
-        fail_msg: "Set AWX_TOKEN in env to run this playbook"
+# Archived original: bootstrap-awx-templates-corrupt-backup-20251023-015619.yml
+# This file has been moved to automation/archive/awx__bootstrap-awx-templates-corrupt-backup-20251023-015619.yml.archive
+# If you need to restore it, copy the archived file back into this location.
 
     - name: Set AWX headers
       set_fact:

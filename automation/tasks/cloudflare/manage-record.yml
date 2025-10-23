@@ -163,6 +163,16 @@
     desired_payload: "{{ desired_payload | combine({'priority': (record_priority | default('10') | int)}) }}"
   when: (record_type | default('') | upper) == 'MX'
 
+- name: Validate CNAME content is a hostname (not URL/path or IP)
+  ansible.builtin.assert:
+    that:
+      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content is defined)"
+      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content | regex_search('://') | not)"
+      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content | regex_search('/') | not)"
+      - "(record_type | default('') | upper) != 'CNAME' or (desired_payload.content | regex_search('^\\d+\\.\\d+\\.\\d+\\.\\d+$') | not)"
+    fail_msg: "Invalid CNAME target '{{ desired_payload.content | default(record_value | default('')) }}'. CNAME content must be a hostname only (no protocol, no path, not an IP). Example: 'target.example.com'"
+  when: (record_type | default('') | upper) == 'CNAME' and (resolved_action | default('') ) != 'delete'
+
 - name: Determine whether existing record matches desired state
   set_fact:
     record_matches: >-

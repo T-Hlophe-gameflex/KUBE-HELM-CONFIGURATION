@@ -1,10 +1,12 @@
 ---
+# Archived copy of: automation/playbooks/cloudflare/global-workflow.yml.new
+
+---
 - name: Cloudflare Global Workflow
   hosts: localhost
   gather_facts: false
   vars:
-    # Prefer the environment variable; passing --extra-vars cloudflare_api_token=... will override this
-    cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default('') | trim }}"
+    cloudflare_api_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default(cloudflare_api_token | default('')) | trim }}"
     dry_run: "{{ dry_run | default(true) }}"
 
   tasks:
@@ -20,7 +22,7 @@
     - name: Validate token when not dry-run
       fail:
         msg: "CLOUDFLARE_API_TOKEN must be set when dry_run is false."
-      when: not (dry_run | bool) and cloudflare_api_token == ''
+      when: (not (dry_run | bool)) and (cloudflare_api_token == "")
 
     - name: Fetch all Cloudflare zones (domains)
       uri:
@@ -48,4 +50,3 @@
       debug:
         var: available_domains
       when: available_domains is defined
- 

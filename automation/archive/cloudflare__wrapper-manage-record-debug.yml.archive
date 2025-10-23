@@ -1,9 +1,26 @@
 ---
----
-# Archived: this debug wrapper has been moved to automation/archive/
-# Archived copy: automation/archive/cloudflare__wrapper-manage-record-debug.yml.archive
+# Archived copy of: automation/playbooks/cloudflare/wrapper-manage-record-debug.yml
 
-# If you need the original debug wrapper restored, copy the archived file back to this path.
+---
+---
+- name: Debug wrapper to keep runner alive
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - defaults.yml
+  tasks:
+    - name: Normalize runner inventory file if necessary
+      block:
+        - name: Ensure AWX_PRIVATE_DATA_DIR is set
+          set_fact:
+            awx_pdd: "{{ lookup('env','AWX_PRIVATE_DATA_DIR') | default('') }}"
+
+        - name: Read runner inventory file if present
+          slurp:
+            src: "{{ awx_pdd }}/inventory/hosts"
+          register: raw_inventory
+          when: awx_pdd != ''
 
         - name: Normalize JSON inventory (convert all.hosts list -> dict)
           when: raw_inventory is defined and raw_inventory.content is defined
