@@ -1,16 +1,16 @@
 ---
 # Align zone-level settings across managed domains.
 
-- name: Build zone/setting pairs
-  set_fact:
-    domain_setting_targets: "{{ managed_domain_list | product(standard_zone_settings | dict2items) | list }}"
-
 # Provide safe defaults so the task can run under AWX when vars are not provided
 - name: Ensure domain and settings defaults
   set_fact:
     managed_domain_list: "{{ managed_domain_list | default([]) }}"
     standard_zone_settings: "{{ standard_zone_settings | default({}) }}"
   tags: always
+
+- name: Build zone/setting pairs
+  set_fact:
+    domain_setting_targets: "{{ managed_domain_list | product(standard_zone_settings | dict2items) | list }}"
 
 - name: Report when no zone settings defined
   debug:
