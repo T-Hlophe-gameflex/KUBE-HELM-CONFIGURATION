@@ -1,4 +1,7 @@
 ---
+# Archived copy of: automation/playbooks/cloudflare/global-workflow.yml.tmp
+
+---
 - name: Cloudflare Global Workflow
   hosts: localhost
   gather_facts: false
@@ -48,4 +51,3 @@
       debug:
         var: available_domains
       when: available_domains is defined
- 
