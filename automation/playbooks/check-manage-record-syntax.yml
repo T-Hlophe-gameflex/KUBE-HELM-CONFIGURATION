@@ -1,7 +1,0 @@
----
-- name: Syntax check wrapper for manage-record tasks
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: include manage-record tasks for syntax check
-      include_tasks: "../tasks/cloudflare/manage-record.yml"
