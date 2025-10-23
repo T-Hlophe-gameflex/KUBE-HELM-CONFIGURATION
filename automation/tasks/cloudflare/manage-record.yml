@@ -68,10 +68,6 @@
   set_fact:
     fqdn_labels: "{{ (fqdn_full | default('')).split('.') if (fqdn_full | default('') | length) > 0 else [] }}"
 
-- name: DEBUG: show fqdn_full and fqdn_labels
-  debug:
-    msg: "fqdn_full={{ fqdn_full | default('') }} fqdn_labels={{ fqdn_labels | default([]) }}"
-
 - name: Require domain when record_name is single-label
   ansible.builtin.assert:
     that:
