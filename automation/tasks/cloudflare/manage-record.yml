@@ -22,12 +22,18 @@
   set_fact:
     cf_validate_certs: "{{ not ((skip_ssl_verify | default(lookup('env','SKIP_SSL_VERIFY') | default('false'))) | bool) }}"
 
-- name: Auto-skip zone discovery during dry-run when no token
+- name: Determine whether to auto-skip zone discovery for local dry-run
   set_fact:
-    skip_zone_discovery: true
+    # Keep the opt-in flag as a boolean; users can set auto_skip_zone_discovery_for_local_dryrun: true
+    auto_skip_zone_discovery_for_local_dryrun: "{{ auto_skip_zone_discovery_for_local_dryrun | default(false) | bool }}"
+    skip_zone_discovery: "{{ (auto_skip_zone_discovery_for_local_dryrun | default(false) | bool) and dry_run_bool and (cf_token | default('') == '') }}"
+  when: dry_run_bool
+
+- name: Set dry-run dummy zone id when skipping discovery
+  set_fact:
     cloudflare_zone_name: "{{ domain | default('dry-run-zone') }}"
     cloudflare_zone_id: "dry-run-zone"
-  when: dry_run_bool and (cf_token | default('') == '')
+  when: skip_zone_discovery | default(false)
 
 - name: Resolve action variable safely (prefer cf_action, fall back to action)
   set_fact:
@@ -83,10 +89,7 @@
     label: "{{ item }}"
 
 
-- name: Show zone_tries results (dry-run)
-  debug:
-    msg: "{{ zone_tries.results | default('[]') | to_nice_json }}"
-  when: dry_run_bool
+
 
 
 - name: Set discovered zone facts when found (first match)
