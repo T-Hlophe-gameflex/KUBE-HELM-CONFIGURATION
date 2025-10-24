@@ -1,1 +1,7 @@
-# Archived: defaults.yml -> automation/archive/defaults.yml.archive
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: noop placeholder for defaults (archived)
+      debug:
+        msg: "Placeholder playbook for defaults.yml (archived). See automation/archive/ for original."

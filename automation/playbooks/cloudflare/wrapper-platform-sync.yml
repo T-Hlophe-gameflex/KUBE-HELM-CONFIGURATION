@@ -7,12 +7,4 @@
         domain: "{{ survey_domain | default(domain | default('')) }}"
         cf_action: "{{ survey_action | default(cf_action | default('')) }}"
 
-    - name: Map other survey fields (optional)
-      set_fact:
-        record_name: "{{ survey_record_name | default(record_name | default('')) }}"
-        record_type: "{{ survey_record_type | default(record_type | default('')) }}"
-        record_value: "{{ survey_record_value | default(record_value | default('')) }}"
-        record_ttl: "{{ survey_record_ttl | default(record_ttl | default('')) }}"
-        record_proxied: "{{ survey_record_proxied | default(record_proxied | default(false)) }}"
-
     - include_tasks: ../../tasks/cloudflare/platform-sync.yml

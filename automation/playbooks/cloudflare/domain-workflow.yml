@@ -1,1 +1,7 @@
-# Archived: domain-workflow.yml -> automation/archive/cloudflare__domain-workflow.yml.archive
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: noop placeholder for domain-workflow (archived)
+      debug:
+        msg: "Placeholder playbook for domain-workflow.yml (archived). See automation/archive/ for original."

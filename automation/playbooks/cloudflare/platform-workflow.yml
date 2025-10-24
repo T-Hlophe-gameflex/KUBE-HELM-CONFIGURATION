@@ -1,1 +1,7 @@
-# Archived: platform-workflow.yml -> automation/archive/cloudflare__platform-workflow.yml.archive
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: noop placeholder for platform-workflow (archived)
+      debug:
+        msg: "Placeholder playbook for platform-workflow.yml (archived). See automation/archive/ for original."

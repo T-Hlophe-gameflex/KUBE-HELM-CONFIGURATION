@@ -1,1 +1,7 @@
-# Archived: test-cloudflare.yml -> automation/archive/cloudflare__test-cloudflare.yml.archive
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: noop placeholder for test-cloudflare (archived)
+      debug:
+        msg: "Placeholder playbook for test-cloudflare.yml (archived). See automation/archive/ for original."
