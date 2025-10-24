@@ -49,7 +49,7 @@ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/confi
 kubectl wait --namespace metallb-system --for=condition=ready pod --selector=app=metallb --timeout=300s
 
 SUBNET=$(docker network inspect -f '{{.IPAM.Config}}' kind | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}' | head -1)
-SUBNET_PREFIX=$(echo $SUBNET | cut -d'.' -f1-3)
+SUBNET_PREFIX=$(echo "$SUBNET" | cut -d'.' -f1-3)
 
 cat <<EOF | kubectl apply -f -
 apiVersion: metallb.io/v1beta1

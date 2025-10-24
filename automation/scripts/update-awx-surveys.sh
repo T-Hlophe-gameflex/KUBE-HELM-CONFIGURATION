@@ -27,10 +27,10 @@ fi
 
 # Read token if not provided, then sanitize (remove surrounding quotes/newlines)
 if [[ -z "${CF_API_TOKEN:-}" ]]; then
-  read -s -p "Enter Cloudflare API token (will not be echoed): " CF_API_TOKEN
+  read -r -s -p "Enter Cloudflare API token (will not be echoed): " CF_API_TOKEN
   echo
 fi
-CF_API_TOKEN="${CF_API_TOKEN}"
+# remove CRLF/newlines
 # remove CRLF/newlines
 CF_API_TOKEN="${CF_API_TOKEN//$'\r'/}"
 CF_API_TOKEN="${CF_API_TOKEN//$'\n'/}"

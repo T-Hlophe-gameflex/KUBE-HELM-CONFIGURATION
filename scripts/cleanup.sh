@@ -254,7 +254,8 @@ create_backup() {
 
     log_header "💾 Creating Backup"
 
-    local backup_dir="$PROJECT_ROOT/backups/$(date +%Y%m%d_%H%M%S)"
+    local backup_dir
+    backup_dir="$PROJECT_ROOT/backups/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
 
     log_info "Creating backup in: $backup_dir"
@@ -348,7 +349,7 @@ cleanup_elk() {
 
     for resource in "${resources[@]}"; do
         log_info "Deleting $resource..."
-        kubectl delete $resource -n "$ELK_NAMESPACE" --ignore-not-found=true --timeout=60s 2>/dev/null || log_warning "Failed to delete $resource"
+        kubectl delete "$resource" -n "$ELK_NAMESPACE" --ignore-not-found=true --timeout=60s 2>/dev/null || log_warning "Failed to delete $resource"
     done
 
     # Delete cluster-wide RBAC for Filebeat
@@ -386,7 +387,7 @@ cleanup_apps() {
 
     for resource in "${resources[@]}"; do
         log_info "Deleting $resource..."
-        kubectl delete $resource -n "$APP_NAMESPACE" --ignore-not-found=true --timeout=60s 2>/dev/null || log_warning "Failed to delete $resource"
+        kubectl delete "$resource" -n "$APP_NAMESPACE" --ignore-not-found=true --timeout=60s 2>/dev/null || log_warning "Failed to delete $resource"
     done
 
     # Delete namespace
@@ -535,7 +536,7 @@ validate_cleanup() {
 
     # Check for orphaned PVCs
     local orphaned_pvcs
-    orphaned_pvcs=$(kubectl get pvc --all-namespaces 2>/dev/null | grep -E "(elastic|postgres|order|user)" | wc -l || echo "0")
+    orphaned_pvcs=$(kubectl get pvc --all-namespaces 2>/dev/null | grep -E "(elastic|postgres|order|user)" -c || echo "0")
     if [[ $orphaned_pvcs -gt 0 ]]; then
         log_warning "$orphaned_pvcs orphaned PVCs found. You may want to clean them up manually."
     fi
