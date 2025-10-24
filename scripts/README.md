@@ -1,6 +1,6 @@
-Canonical scripts
+# Canonical scripts
 
-This folder previously contained multiple legacy scripts that were duplicated under automation/. To reduce confusion we consolidated canonical scripts under automation/ and moved legacy copies to automation/archive/. The two scripts that were replaced with stubs are:
+This folder previously contained multiple legacy scripts that were duplicated under `automation/`. To reduce confusion we consolidated canonical scripts under `automation/` and moved legacy copies to `automation/archive/`. The two scripts that were replaced with stubs are:
 
 - scripts/awx_cleanup_and_create_templates.sh -> stub that points to automation/awx-api-cloudflare-templates.sh
 - scripts/update_awx_survey_records.sh -> stub that points to automation/scripts/update-awx-surveys.sh
