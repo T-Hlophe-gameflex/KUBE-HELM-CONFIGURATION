@@ -65,6 +65,12 @@ This folder contains dynamic Ansible playbooks for AWX job templates to manage C
 
   **Tip:** Use the provided `update-awx-surveys.sh` script to auto-populate dropdowns from Cloudflare.
 
+  Notes on AWX types and token precedence:
+  - AWX survey `multiplechoice` fields submit values as strings. For boolean-like fields (e.g. `dry_run`) use the literal strings `"true"` or `"false"` in the survey choices — the wrapper/playbook normalizes them into booleans at runtime. If your AWX job gives an error like "Value True for 'dry_run' expected to be one of ['true','false']" it means the survey provided an actual boolean instead of the expected string values.
+  - Token precedence: attach a Cloudflare credential to the AWX job template (recommended). The wrapper resolves token preference as:
+    1. Runner environment variable `CLOUDFLARE_API_TOKEN` (set by AWX credential injection)
+    2. Survey-provided token variable (`survey_cloudflare_token`) — only use for one-offs
+    3. Local environment fallback (not recommended for AWX)
   ## Usage Examples
 
   ### Launching a Playbook (AWX API)

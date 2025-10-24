@@ -9,6 +9,13 @@ Quick notes:
 - Job templates: Cloudflare-manage-record, Cloudflare-domain-standardize, Cloudflare-global-standardize, Cloudflare-platform-sync, Cloudflare-sync-governance-template
 - Surveys: Job templates can be configured with AWX "Surveys" to present interactive fields (domain dropdown, action, record name, value, TTL, proxied). See automation/playbooks/cloudflare/README.md for details on survey variables and how to add domains.
 
+Important notes (token precedence & dry-run)
+-----------------------------------------
+
+- Token precedence: AWX-injected credentials are preferred. If the job template has a Cloudflare credential attached that injects `CLOUDFLARE_API_TOKEN` into the runner environment, the playbooks will use that token automatically. Only supply a token via the survey (less preferred) when you need a one-off token. The wrapper playbooks resolve token precedence as: runner env `CLOUDFLARE_API_TOKEN` -> survey token variable -> local env fallback.
+
+- Dry-run safety: The playbooks follow a safety-first workflow. Always run jobs with `dry_run=true` (AWX survey value) first. The `manage-record` task shows `DRY-RUN: desired_payload=...` or `DRY-RUN: Would delete record ...` messages so you can verify changes before applying. Mutating operations require a valid token and `dry_run=false` to proceed.
+
 If you want AWX to present a dropdown of managed domains, update the job template surveys in AWX (or using the AWX API) with the choices string (pipe-separated list). Example choices: "example.com|example.org|sub.example.com".
 
 To update the project in AWX after making changes in this repo, push changes to the `main` branch and trigger a Project Update in AWX (or use the AWX API: POST /api/v2/projects/<id>/update/).

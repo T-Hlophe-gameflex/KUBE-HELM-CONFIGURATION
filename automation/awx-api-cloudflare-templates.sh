@@ -2,9 +2,17 @@
 set -euo pipefail
 
 
- # Config
-AWX_HOST="http://localhost:8043"
-AWX_USER="admin"
+ # Config (allow override via env)
+ AWX_HOST="${AWX_HOST:-http://localhost:8043}"
+ AWX_USER="${AWX_USER:-admin}"
+ DRY_RUN=false
+
+ # Simple CLI arg parsing for --dry-run
+ for arg in "$@"; do
+   case "$arg" in
+     --dry-run) DRY_RUN=true ;;
+   esac
+ done
 
 # Get AWX admin password from k8s secret
 AWX_PASS=$(kubectl get secret awx-admin-password -n awx -o jsonpath='{.data.password}' | base64 --decode 2>/dev/null || true)
@@ -46,14 +54,27 @@ for name in "${!MAP[@]}"; do
   # Check if template exists
   EXIST=$(awx_get "/api/v2/job_templates/?name=$name" | python3 -c 'import sys,json;j=json.load(sys.stdin);print(j.get("count",0))')
   if [ "$EXIST" -gt 0 ]; then
-    echo "Job template '$name' already exists."
+    echo "Job template '$name' already exists. Will PATCH to ensure settings are up-to-date."
     ID=$(awx_get "/api/v2/job_templates/?name=$name" | python3 -c 'import sys,json;j=json.load(sys.stdin);print(j["results"][0]["id"])')
+    # Patch the existing template to ensure playbook/project/credential are set (idempotent)
+    if [ "$DRY_RUN" = false ]; then
+      PATCH_PAYLOAD=$(printf '{"project":%d, "playbook":"%s", "credential":%d}' "$PROJECT_ID" "${PLAYBOOK_PATH_PREFIX}$pb_basename" "$CRED_ID")
+      curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X PATCH "$AWX_HOST/api/v2/job_templates/$ID/" -d "$PATCH_PAYLOAD" >/dev/null || true
+      echo "Patched existing job_template $ID"
+    else
+      echo "DRY-RUN: would PATCH job_template $ID with playbook ${PLAYBOOK_PATH_PREFIX}$pb_basename"
+    fi
   else
     echo "Creating job template '$name'..."
-    CREATE=$(curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X POST "$AWX_HOST/api/v2/job_templates/" \
-      -d "{\"name\":\"$name\",\"job_type\":\"run\",\"inventory\":$INVENTORY_ID,\"project\":$PROJECT_ID,\"playbook\":\"${PLAYBOOK_PATH_PREFIX}$pb_basename\",\"credential\":$CRED_ID}")
-    ID=$(python3 -c 'import sys,json;j=json.load(sys.stdin);print(j.get("id",""))' <<< "$CREATE")
-    echo "Create response: $CREATE"
+    if [ "$DRY_RUN" = false ]; then
+      CREATE=$(curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X POST "$AWX_HOST/api/v2/job_templates/" \
+        -d "{\"name\":\"$name\",\"job_type\":\"run\",\"inventory\":$INVENTORY_ID,\"project\":$PROJECT_ID,\"playbook\":\"${PLAYBOOK_PATH_PREFIX}$pb_basename\",\"credential\":$CRED_ID}")
+      ID=$(python3 -c 'import sys,json;j=json.load(sys.stdin);print(j.get("id",""))' <<< "$CREATE")
+      echo "Create response: $CREATE"
+    else
+      echo "DRY-RUN: would create job_template '$name' with playbook ${PLAYBOOK_PATH_PREFIX}$pb_basename"
+      ID="(dry-run)"
+    fi
   fi
   if [ -z "$ID" ]; then echo "Failed to get job template id for $name"; exit 1; fi
   echo "Launching $name (job_template id=$ID)"
