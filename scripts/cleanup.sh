@@ -13,6 +13,8 @@ set -euo pipefail
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# Intentionally keep AUTOMATION_DIR for external callers or future use. Silence shellcheck unused-var warning.
+# shellcheck disable=SC2034
 AUTOMATION_DIR="$PROJECT_ROOT/automation"
 
 # Default configuration
@@ -312,13 +314,15 @@ EOF
 
     chmod +x "$backup_dir/restore.sh"
 
-    echo -e "${CYAN}Backup Information:${NC}" > "$backup_dir/README.md"
-    echo "- Created: $(date)" >> "$backup_dir/README.md"
-    echo "- Cleanup Mode: $CLEANUP_MODE" >> "$backup_dir/README.md"
-    echo "- ELK Namespace: $ELK_NAMESPACE" >> "$backup_dir/README.md"
-    echo "- App Namespace: $APP_NAMESPACE" >> "$backup_dir/README.md"
-    echo "" >> "$backup_dir/README.md"
-    echo "To restore: ./restore.sh" >> "$backup_dir/README.md"
+    cat > "$backup_dir/README.md" <<EOF
+Backup Information
+- Created: $(date)
+- Cleanup Mode: $CLEANUP_MODE
+- ELK Namespace: $ELK_NAMESPACE
+- App Namespace: $APP_NAMESPACE
+
+To restore: ./restore.sh
+EOF
 
     log_success "Backup created successfully: $backup_dir"
 }
