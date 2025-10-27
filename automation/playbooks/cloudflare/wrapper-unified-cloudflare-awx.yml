@@ -1,0 +1,176 @@
+
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    # Unified AWX Cloudflare Management Tasks (for include_tasks)
+    # Standardizes global/domain settings, manages domains/records, and syncs platforms.
+
+    # Actions are selected via survey (AWX extra_vars)
+
+    - name: Debug Cloudflare API token (for troubleshooting only)
+      debug:
+        msg: "CLOUDFLARE_API_TOKEN = {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+      no_log: false
+
+    - name: Show selected action and input
+      debug:
+        msg: "Action: {{ cf_action }}, Domain: {{ domain }}, Record: {{ record_name }} ({{ record_type }})"
+
+    - name: Create domain (zone) if requested
+      when: cf_action == 'create_domain'
+      block:
+        - name: Create Cloudflare zone
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              name: "{{ domain }}"
+              jump_start: true
+            return_content: true
+            validate_certs: false
+          register: create_zone_result
+        - name: Output zone creation result
+          debug:
+            var: create_zone_result.json
+
+    - name: Standardize domain settings (always runs after create_domain or on demand)
+      when: cf_action in ['create_domain', 'standardize', 'sync']
+      block:
+        - name: Get zone ID for domain
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: false
+          register: zone_lookup
+        - name: Set zone_id fact
+          set_fact:
+            zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
+        - name: Apply standard zone settings
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
+            method: PATCH
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              value: "{{ item.value }}"
+            return_content: true
+            validate_certs: false
+          loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
+          register: zone_settings_result
+        - name: Output zone settings result
+          debug:
+            var: zone_settings_result.results
+
+    - name: Manage DNS record (create/update/delete)
+      when: cf_action in ['create_record', 'update_record', 'delete_record']
+      block:
+        - name: Get zone ID for domain
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: false
+          register: zone_lookup
+        - name: Set zone_id fact
+          set_fact:
+            zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
+        - name: Find existing record (if any)
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}.{{ domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: false
+          register: record_lookup
+        - name: Set record_id fact
+          set_fact:
+            record_id: "{{ record_lookup.json.result[0].id if record_lookup.json.result|length > 0 else '' }}"
+        - name: Create or update record
+          when: cf_action in ['create_record', 'update_record']
+          uri:
+            url: >-
+              https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}
+            method: "{{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }}"
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              type: "{{ record_type }}"
+              name: "{{ record_name }}.{{ domain }}"
+              content: "{{ record_value }}"
+              ttl: "{{ global_ttl | default(3600) }}"
+              proxied: "{{ global_proxied | default(false) }}"
+            return_content: true
+            validate_certs: false
+          register: record_result
+        - name: Delete record
+          when: cf_action == 'delete_record' and record_id
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
+            method: DELETE
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: false
+          register: delete_result
+        - name: Output record operation result
+          debug:
+            msg: >-
+              {{ record_result.json if cf_action in ['create_record', 'update_record'] else delete_result.json if cf_action == 'delete_record' else 'No action performed.' }}
+
+    - name: Sync platform records (apply standard records to all domains)
+      when: cf_action == 'sync'
+      block:
+        - name: Get all zones
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+          register: all_zones
+        - name: Apply standard records to each zone
+          include_tasks: apply-standard-records.yml
+          loop: "{{ all_zones.json.result }}"
+          loop_control:
+            loop_var: zone
+
+    - name: Output global settings summary
+      debug:
+        msg: |
+          Global settings applied:
+          TTL: {{ global_ttl | default(3600) }}
+          Proxied: {{ global_proxied | default(false) }}
+          Zone settings: {{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) }}
+
+    - name: Output domain settings summary
+      when: domain is defined and domain|length > 0
+      debug:
+        msg: |
+          Domain: {{ domain }}
+          Zone ID: {{ zone_id | default('N/A') }}
+          Zone settings applied: {{ zone_settings_result.results if zone_settings_result is defined else 'N/A' }}
+
+    - name: Output platform sync summary
+      when: cf_action == 'sync'
+      debug:
+        msg: |
+          Platform sync applied to all domains. Standard records: {{ standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}]) }}
+
+    - name: Output summary of all actions
+      debug:
+        msg: "Unified playbook completed. See above for detailed results."
