@@ -14,8 +14,9 @@ set -euo pipefail
    esac
  done
 
-# Get AWX admin password from k8s secret
-AWX_PASS=$(kubectl get secret awx-admin-password -n awx -o jsonpath='{.data.password}' | base64 --decode 2>/dev/null || true)
+
+
+AWX_PASS=$(kubectl get secret ansible-awx-admin-password -n awx -o jsonpath='{.data.password}' | base64 --decode 2>/dev/null || true)
 if [ -z "$AWX_PASS" ]; then
   echo "Could not get AWX admin password from Kubernetes. Is kubectl configured and the secret present?"
   exit 1
