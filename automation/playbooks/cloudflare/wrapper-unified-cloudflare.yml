@@ -1,0 +1,28 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Map survey variables -> playbook variables
+      set_fact:
+        domain: "{{ survey_domain | default(domain | default('')) }}"
+        cf_action: "{{ survey_action | default(cf_action | default('')) }}"
+        record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+        record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+        record_value: "{{ survey_record_value | default(record_value | default('')) }}"
+        record_ttl: "{{ survey_record_ttl | default(record_ttl | default('auto')) }}"
+        record_proxied: "{{ survey_record_proxied | default(record_proxied | default('false')) }}"
+        record_priority: "{{ survey_record_priority | default(record_priority | default('')) }}"
+
+    - name: Resolve Cloudflare token (env preferred, then survey/password)
+      set_fact:
+        resolved_cf_token: "{{ lookup('env','CLOUDFLARE_API_TOKEN') | default(survey_cloudflare_token | default(CLOUDFLARE_API_TOKEN | default(''))) }}"
+      no_log: true
+
+    - name: Optionally include naming helper when requested
+      include_tasks: ../tasks/cloudflare/naming-helper.yml
+      when: naming_pattern is defined
+
+    - name: Include unified Cloudflare AWX playbook
+      include_tasks: ../../unified-cloudflare-awx-playbook.yml

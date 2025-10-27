@@ -1,0 +1,50 @@
+[
+  {
+    "variable": "cf_action",
+    "type": "multiplechoice",
+    "question_name": "What action do you want to perform?",
+    "choices": [
+      "create_domain",
+      "create_record",
+      "update_record",
+      "delete_record",
+      "sync",
+      "standardize"
+    ],
+    "required": true,
+    "default": "create_record"
+  },
+  {
+    "variable": "domain",
+    "type": "text",
+    "question_name": "Domain name (e.g. example.com)",
+    "required": false
+  },
+  {
+    "variable": "record_name",
+    "type": "text",
+    "question_name": "Record name (e.g. www)",
+    "required": false
+  },
+  {
+    "variable": "record_type",
+    "type": "multiplechoice",
+    "question_name": "Record type",
+    "choices": ["A", "AAAA", "CNAME", "TXT", "MX", "SRV", "NS", "PTR"],
+    "required": false
+  },
+  {
+    "variable": "record_value",
+    "type": "text",
+    "question_name": "Record value (e.g. 1.2.3.4)",
+    "required": false
+  },
+  {
+    "variable": "dry_run",
+    "type": "multiplechoice",
+    "question_name": "Dry run (preview only, no changes)?",
+    "choices": ["true", "false"],
+    "required": true,
+    "default": "true"
+  }
+]

@@ -1,4 +1,5 @@
 ---
+
 # Manage Cloudflare DNS record (idempotent, safety-first defaults)
 
 - name: Normalize inputs
@@ -51,12 +52,26 @@
       - (resolved_action == 'delete' or record_value is defined)
     fail_msg: "record_name, record_type and record_value must be provided"
 
+
 - name: Build fqdn_labels (support single-label + domain)
   set_fact:
     fqdn_labels: >-
       {{ (record_name | default('')).split('.') if ('.' in (record_name | default(''))) 
          else ((record_name ~ '.' ~ domain).split('.') if (domain is defined and (domain | length) > 0) 
                else (record_name | default('')).split('.')) }}
+
+# For delete actions, auto-append .domain to record_name if not already FQDN
+- name: Normalize record_name for delete
+  set_fact:
+    normalized_record_name: >-
+      {{ record_name if (record_name.endswith('.' ~ domain)) else (record_name ~ '.' ~ domain) }}
+  when: resolved_action == 'delete' and domain is defined
+
+# For non-delete actions, use record_name as-is
+- name: Normalize record_name for non-delete
+  set_fact:
+    normalized_record_name: "{{ record_name }}"
+  when: resolved_action != 'delete'
 
 - name: Initialize candidates list
   set_fact:
@@ -104,9 +119,10 @@
     msg: "Unable to discover Cloudflare zone for {{ record_name }}. Tried: {{ candidates }}"
   when: cloudflare_zone_id is not defined
 
+
 - name: Lookup existing DNS record
   ansible.builtin.uri:
-    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}&per_page=1"
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records?type={{ record_type }}&name={{ normalized_record_name }}&per_page=1"
     method: GET
     headers: "{{ cf_headers_get }}"
     return_content: yes
@@ -119,11 +135,12 @@
     existing_record: "{{ existing_record_query.json.result[0] }}"
   when: existing_record_query.json is defined and (existing_record_query.json.result is not none) and (existing_record_query.json.result | default([]) | length) > 0
 
+
 - name: Build desired payload
   set_fact:
     desired_payload:
       type: "{{ record_type }}"
-      name: "{{ (record_name | lower) }}"
+      name: "{{ (normalized_record_name | lower) }}"
       content: "{{ record_value }}"
       ttl: "{{ ttl_num }}"
       proxied: "{{ proxied_bool }}"

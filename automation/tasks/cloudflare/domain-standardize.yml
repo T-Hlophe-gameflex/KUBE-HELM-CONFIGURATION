@@ -1,7 +1,6 @@
 ---
 # Align zone-level settings across managed domains.
 
-# Provide safe defaults so the task can run under AWX when vars are not provided
 - name: Ensure domain and settings defaults
   set_fact:
     managed_domain_list: "{{ managed_domain_list | default([]) }}"

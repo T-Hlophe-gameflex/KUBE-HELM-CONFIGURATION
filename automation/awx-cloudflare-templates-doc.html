@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AWX/Cloudflare Templates Documentation</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f8f9fa; color: #222; margin: 2em; }
+        h1 { color: #0057b8; }
+        table { border-collapse: collapse; width: 100%; background: #fff; }
+        th, td { border: 1px solid #ddd; padding: 12px; }
+        th { background: #e9ecef; color: #0057b8; }
+        tr:nth-child(even) { background: #f2f2f2; }
+        .purpose { font-weight: bold; color: #333; }
+        .features { font-size: 0.98em; color: #444; }
+    </style>
+</head>
+<body>
+    <h1>AWX/Cloudflare Templates Documentation</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Template/Playbook</th>
+                <th>Purpose</th>
+                <th>Main Features</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>manage-record.yml</td>
+                <td class="purpose">Manages Cloudflare DNS records (CRUD) safely and idempotently.</td>
+                <td class="features">
+                    <ul>
+                        <li>Normalizes inputs (dry-run, TTL, proxied flags)</li>
+                        <li>Auto-expands short record names to FQDN for deletes</li>
+                        <li>Uses Cloudflare API token from env or variable</li>
+                        <li>Asserts required parameters</li>
+                        <li>Supports dry-run mode</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td>global-standardize.yml</td>
+                <td class="purpose">Enforces global record defaults (TTL, proxied) across domains.</td>
+                <td class="features">
+                    <ul>
+                        <li>Loads standardization targets from template</li>
+                        <li>Updates records to match global defaults</li>
+                        <li>Logs changes and reports when no updates needed</li>
+                        <li>Skips updates in dry-run mode</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td>domain-standardize.yml</td>
+                <td class="purpose">Aligns zone-level settings across managed domains.</td>
+                <td class="features">
+                    <ul>
+                        <li>Applies standard zone settings via Cloudflare API</li>
+                        <li>Reports when no settings defined</li>
+                        <li>Logs changes for audit</li>
+                        <li>Skips updates in dry-run mode</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td>platform-sync.yml</td>
+                <td class="purpose">Clones standard DNS records across domains for consistency.</td>
+                <td class="features">
+                    <ul>
+                        <li>Determines record keys to sync</li>
+                        <li>Validates keys in standard profile</li>
+                        <li>Loads sync targets from template</li>
+                        <li>Applies synchronization per target</li>
+                        <li>Error handling and skips if no valid targets</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td>sync-governance-template.yml</td>
+                <td class="purpose">Synchronizes and updates AWX job template surveys for governance.</td>
+                <td class="features">
+                    <ul>
+                        <li>Looks up AWX job template metadata via API</li>
+                        <li>Fetches and updates survey specification</li>
+                        <li>Applies field overrides</li>
+                        <li>Persists updates to AWX (skips in dry-run)</li>
+                        <li>Tracks updated templates for reporting</li>
+                    </ul>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</body>
+</html>

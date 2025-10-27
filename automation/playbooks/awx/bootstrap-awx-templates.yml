@@ -11,6 +11,13 @@
     cf_credential_id: "{{ lookup('env','CF_CREDENTIAL_ID') | default('') }}"
 
   tasks:
+    - name: Require AWX_URL
+      ansible.builtin.assert:
+        that:
+          - awx_url != ''
+        fail_msg: "AWX_URL must be set in the environment to run this bootstrap playbook"
+
+  tasks:
     - name: Require AWX_TOKEN
       ansible.builtin.assert:
         that:
@@ -32,6 +39,10 @@
       register: jt_check_manage_domain
       failed_when: false
 
+    - name: Debug Manage Domain response
+      debug:
+        var: jt_check_manage_domain
+
     - name: Create Manage Domain when missing (POST)
       uri:
         url: "{{ awx_url }}/api/v2/job_templates/"
@@ -49,7 +60,8 @@
           }
         status_code: 201
         return_content: yes
-      when: jt_check_manage_domain.json.count|int == 0
+      when: (jt_check_manage_domain.json is defined and jt_check_manage_domain.json.count|int == 0)
+            or (jt_check_manage_domain.json is not defined)
       register: created_manage_domain_response
       failed_when: false
 
@@ -79,7 +91,8 @@
           }
         status_code: 201
         return_content: yes
-      when: jt_check_manage_record.json.count|int == 0
+      when: (jt_check_manage_record.json is defined and jt_check_manage_record.json.count|int == 0)
+            or (jt_check_manage_record.json is not defined)
       register: created_manage_record_response
       failed_when: false
 
@@ -99,10 +112,8 @@
 
     - name: Resolve template ids
       set_fact:
-        manage_record_template_id: >-
-          {{ (jt_check_manage_record.json.results[0].id if (jt_check_manage_record.json.count|int) > 0 else (created_manage_record_response.json.id if (created_manage_record_response is defined) else '')) }}
-        manage_domain_template_id: >-
-          {{ (jt_check_manage_domain.json.results[0].id if (jt_check_manage_domain.json.count|int) > 0 else (created_manage_domain_response.json.id if (created_manage_domain_response is defined) else '')) }}
+        manage_record_template_id: "{{ jt_check_manage_record.json.results[0].id if (jt_check_manage_record.json is defined and jt_check_manage_record.json.count|int > 0) else (created_manage_record_response.json.id if (created_manage_record_response is defined and created_manage_record_response.json is defined) else '') }}"
+        manage_domain_template_id: "{{ jt_check_manage_domain.json.results[0].id if (jt_check_manage_domain.json is defined and jt_check_manage_domain.json.count|int > 0) else (created_manage_domain_response.json.id if (created_manage_domain_response is defined and created_manage_domain_response.json is defined) else '') }}"
 
     - name: Attach credential to Job Templates when available
       when: final_cf_credential_id is defined and final_cf_credential_id != ''
@@ -146,4 +157,55 @@
         msg:
           - "Manage Record present: {{ (jt_check_manage_record.json.count|int) > 0 or (created_manage_record_response is defined) }}"
           - "Manage Domain present: {{ (jt_check_manage_domain.json.count|int) > 0 or (created_manage_domain_response is defined) }}"
+          - "CF credential attached: {{ final_cf_credential_id is defined and final_cf_credential_id != '' }}"
+
+    - name: Ensure Unified Cloudflare AWX template exists (GET)
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/?name=Unified%20Cloudflare%20AWX"
+        method: GET
+        headers: "{{ awx_headers }}"
+        return_content: yes
+      register: jt_check_unified
+      failed_when: false
+
+    - name: Create Unified Cloudflare AWX template when missing (POST)
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/"
+        method: POST
+        headers: "{{ awx_headers }}"
+        body: >
+          {
+            "name": "Unified Cloudflare AWX",
+            "description": "Unified management of Cloudflare domains and records",
+            "job_type": "run",
+            "inventory": {{ awx_inventory_id }},
+            "project": {{ awx_project_id }},
+            "playbook": "automation/unified-cloudflare-awx-playbook.yml",
+            "ask_variables_on_launch": true
+          }
+        status_code: 201
+        return_content: yes
+      when: jt_check_unified.json.count|int == 0
+      register: created_unified_response
+      failed_when: false
+
+    - name: Resolve unified template id
+      set_fact:
+        unified_template_id: "{{ jt_check_unified.json.results[0].id if (jt_check_unified.json is defined and jt_check_unified.json.count|int > 0) else (created_unified_response.json.id if (created_unified_response is defined and created_unified_response.json is defined) else '') }}"
+
+    - name: Attach credential to Unified Cloudflare AWX template when available
+      when: final_cf_credential_id is defined and final_cf_credential_id != ''
+      uri:
+        url: "{{ awx_url }}/api/v2/job_templates/{{ unified_template_id }}/"
+        method: PATCH
+        headers: "{{ awx_headers }}"
+        body: "{{ {'credential': (final_cf_credential_id|int)} | to_json }}"
+        status_code: 200
+        return_content: yes
+      failed_when: false
+
+    - name: Bootstrap summary (unified)
+      debug:
+        msg:
+          - "Unified Cloudflare AWX present: {{ (jt_check_unified.json.count|int) > 0 or (created_unified_response is defined) }}"
           - "CF credential attached: {{ final_cf_credential_id is defined and final_cf_credential_id != '' }}"
