@@ -1,8 +1,23 @@
 
----
-- hosts: localhost
   gather_facts: false
+  connection: local
   tasks:
+    - name: Map survey variables -> playbook variables
+      set_fact:
+        domain: "{{ survey_domain | default(domain | default('')) }}"
+        cf_action: "{{ survey_action | default(cf_action | default('')) }}"
+        record_name: "{{ survey_record_name | default(record_name | default('')) }}"
+        record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
+        record_value: "{{ survey_record_value | default(record_value | default('')) }}"
+        global_ttl: "{{ survey_record_ttl | default(global_ttl | default('auto')) }}"
+        global_proxied: "{{ survey_record_proxied | default(global_proxied | default('false')) }}"
+        record_priority: "{{ survey_record_priority | default(record_priority | default('')) }}"
+        dry_run: "{{ survey_dry_run | default(dry_run | default('false')) }}"
+        # Safe defaults for platform-sync include
+        record_keys: "{{ survey_record_keys | default(record_keys | default([])) }}"
+        selected_record_keys: "{{ survey_selected_record_keys | default(selected_record_keys | default(record_keys | default([]))) }}"
+        standard_records: "{{ survey_standard_records | default(standard_records | default([])) }}"
+        platform_presets: "{{ survey_platform_presets | default(platform_presets | default({})) }}"
     # Unified AWX Cloudflare Management Tasks (for include_tasks)
     # Standardizes global/domain settings, manages domains/records, and syncs platforms.
 
