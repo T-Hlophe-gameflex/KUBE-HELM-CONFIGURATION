@@ -30,15 +30,21 @@
 
 - name: Build platform synchronization targets
   set_fact:
-    platform_sync_targets: >-
+    # Find the first existing template path (prefer playbook_dir relative path), render it, then parse YAML
+    platform_targets_template_path: >-
       {{ lookup('first_found', {
-        'files': [
-          playbook_dir + '/../../templates/cloudflare/platform-targets.j2',
-          'automation/templates/cloudflare/platform-targets.j2',
-          'templates/cloudflare/platform-targets.j2'
-        ],
-        'errors': 'ignore'
-      }) | from_yaml | default([], true) }}
+          'files': [
+            playbook_dir + '/../../templates/cloudflare/platform-targets.j2',
+            'automation/templates/cloudflare/platform-targets.j2',
+            'templates/cloudflare/platform-targets.j2'
+          ],
+          'errors': 'ignore'
+        }) }}
+
+    platform_sync_targets: >-
+      {{ (
+           (lookup('template', platform_targets_template_path) if platform_targets_template_path | length > 0 else '')
+         ) | from_yaml | default([], true) }}
 
 - name: Collect errors from target generation
   set_fact:

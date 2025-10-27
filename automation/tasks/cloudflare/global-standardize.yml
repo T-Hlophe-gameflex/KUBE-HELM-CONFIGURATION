@@ -2,7 +2,18 @@
 # Enforce global record defaults (TTL, proxied) across all managed domains.
 - name: Build global standardization targets
   set_fact:
-    global_standardize_targets: "{{ lookup('template', 'automation/templates/cloudflare/global-targets.j2') | from_yaml | default([], true) }}"
+    global_standardize_template_path: >-
+      {{ lookup('first_found', {
+          'files': [
+            playbook_dir + '/../../templates/cloudflare/global-targets.j2',
+            'automation/templates/cloudflare/global-targets.j2',
+            'templates/cloudflare/global-targets.j2'
+          ],
+          'errors': 'ignore'
+        }) }}
+
+    global_standardize_targets: >-
+      {{ (lookup('template', global_standardize_template_path) if global_standardize_template_path | length > 0 else '') | from_yaml | default([], true) }}
 
 - name: Report when no records require global standardization
   debug:
