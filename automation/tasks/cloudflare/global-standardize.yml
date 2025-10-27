@@ -2,48 +2,15 @@
 # Enforce global record defaults (TTL, proxied) across all managed domains.
 - name: Build global standardization targets
   set_fact:
-    global_standardize_targets: "{{ lookup('template', 'templates/cloudflare/global-targets.j2') | from_yaml | default([], true) }}"
+    global_standardize_targets: "{{ lookup('template', 'automation/templates/cloudflare/global-targets.j2') | from_yaml | default([], true) }}"
 
 - name: Report when no records require global standardization
   debug:
     msg: "No records require updates for global standardization."
   when: global_standardize_targets | length == 0
 
-- name: Update records to match global defaults
-  block:
-    - name: Build payload for record
-      set_fact:
-        global_payload:
-          type: "{{ target.type }}"
-          name: "{{ target.name }}"
-          content: "{{ target.content }}"
-          ttl: "{{ target.desired_ttl | int }}"
-
-    - name: Include proxied flag when enforced
-      set_fact:
-        global_payload: "{{ global_payload | combine({'proxied': target.desired_proxied}) }}"
-      when: target.desired_proxied is not none
-
-    - name: Apply record update via Cloudflare API
-      uri:
-        url: "{{ api_base }}/zones/{{ zone_map[target.domain] }}/dns_records/{{ target.record_id }}"
-        method: PUT
-        headers: "{{ cloudflare_headers }}"
-        body_format: json
-        body: "{{ global_payload | to_json }}"
-        return_content: true
-      register: global_update_result
-
-    - name: Append update summary to change log
-      set_fact:
-        change_log: "{{ change_log + [global_update_summary] }}"
-      vars:
-        global_update_summary:
-          workflow: global_standardize
-          domain: "{{ target.domain }}"
-          record: "{{ target.name }}"
-          status: "{{ global_update_result.json.success | default(false) | bool }}"
-
+- name: Apply global standardization (per-target)
+  include_tasks: apply-global-standardize-item.yml
   loop: "{{ global_standardize_targets }}"
   loop_control:
     loop_var: target

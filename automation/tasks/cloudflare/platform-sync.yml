@@ -1,27 +1,36 @@
 ---
 # Clone standard records across domains ensuring consistent configuration.
 
+- name: Ensure safe vars for record keys and presets
+  set_fact:
+    record_keys_safe: "{{ record_keys | default([]) }}"
+    standard_records_safe: "{{ standard_records | default({}) }}"
+    platform_presets_safe: "{{ platform_presets | default({}) }}"
+
 - name: Determine selected record keys for platform sync
   set_fact:
     selected_record_keys: >-
       {{
-        record_keys if record_keys | length > 0 else (
-          (platform_presets | default({})).get(platform_preset, {}).get('record_keys', [])
-          if platform_presets is defined and platform_presets | length > 0
-          else (standard_records.keys() | list)
+        (record_keys_safe
+         if (record_keys_safe | length) > 0
+         else (
+           (platform_presets_safe.get(platform_preset, {}).get('record_keys', []))
+           if (platform_preset is defined and (platform_presets_safe | length) > 0)
+           else ((standard_records_safe.keys() | list) if (standard_records_safe | length) > 0 else [])
+         )
         )
       }}
 
 - name: Ensure record keys exist in standard profile
   assert:
     that:
-      - (selected_record_keys | difference(standard_records.keys() | list)) | length == 0
+      - (selected_record_keys | difference(standard_records_safe.keys() | list)) | length == 0
     fail_msg: >-
-      Some record keys are not defined in standard_records: {{ selected_record_keys | difference(standard_records.keys() | list) }}
+      Some record keys are not defined in standard_records: {{ selected_record_keys | difference(standard_records_safe.keys() | list) }}
 
 - name: Build platform synchronization targets
   set_fact:
-    platform_sync_targets: "{{ lookup('template', 'templates/cloudflare/platform-targets.j2') | from_yaml | default([], true) }}"
+  platform_sync_targets: "{{ lookup('template', 'automation/templates/cloudflare/platform-targets.j2') | from_yaml | default([], true) }}"
 
 - name: Collect errors from target generation
   set_fact:

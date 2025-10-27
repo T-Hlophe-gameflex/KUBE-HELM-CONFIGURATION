@@ -1,0 +1,34 @@
+---
+# Apply a single global standardization update for 'target'
+- name: Build payload for record
+  set_fact:
+    global_payload:
+      type: "{{ target.type }}"
+      name: "{{ target.name }}"
+      content: "{{ target.content }}"
+      ttl: "{{ target.desired_ttl | int }}"
+
+- name: Include proxied flag when enforced
+  set_fact:
+    global_payload: "{{ global_payload | combine({'proxied': target.desired_proxied}) }}"
+  when: target.desired_proxied is not none
+
+- name: Apply record update via Cloudflare API
+  uri:
+    url: "{{ api_base }}/zones/{{ zone_map[target.domain] }}/dns_records/{{ target.record_id }}"
+    method: PUT
+    headers: "{{ cloudflare_headers }}"
+    body_format: json
+    body: "{{ global_payload | to_json }}"
+    return_content: true
+  register: global_update_result
+
+- name: Append update summary to change log
+  set_fact:
+    change_log: "{{ change_log + [global_update_summary] }}"
+  vars:
+    global_update_summary:
+      workflow: global_standardize
+      domain: "{{ target.domain }}"
+      record: "{{ target.name }}"
+      status: "{{ global_update_result.json.success | default(false) | bool }}"
