@@ -30,7 +30,12 @@
 
 - name: Build platform synchronization targets
   set_fact:
-  platform_sync_targets: "{{ lookup('template', 'automation/templates/cloudflare/platform-targets.j2') | from_yaml | default([], true) }}"
+    platform_sync_targets: >-
+      {{
+        (lookup('template', 'templates/cloudflare/platform-targets.j2') | from_yaml | default([], true))
+        if (lookup('template', 'templates/cloudflare/platform-targets.j2') is not none)
+        else (lookup('template', 'automation/templates/cloudflare/platform-targets.j2') | from_yaml | default([], true))
+      }}
 
 - name: Collect errors from target generation
   set_fact:
