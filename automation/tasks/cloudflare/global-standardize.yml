@@ -42,7 +42,7 @@
           workflow: global_standardize
           domain: "{{ target.domain }}"
           record: "{{ target.name }}"
-          status: {{ global_update_result.json.success | default(false) | bool }}
+          status: "{{ global_update_result.json.success | default(false) | bool }}"
 
   loop: "{{ global_standardize_targets }}"
   loop_control:

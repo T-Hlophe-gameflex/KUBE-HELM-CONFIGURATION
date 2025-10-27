@@ -1,4 +1,5 @@
-
+---
+- hosts: localhost
   gather_facts: false
   connection: local
   tasks:
@@ -16,8 +17,9 @@
         # Safe defaults for platform-sync include
         record_keys: "{{ survey_record_keys | default(record_keys | default([])) }}"
         selected_record_keys: "{{ survey_selected_record_keys | default(selected_record_keys | default(record_keys | default([]))) }}"
-        standard_records: "{{ survey_standard_records | default(standard_records | default([])) }}"
+        standard_records: "{{ survey_standard_records | default(standard_records | default({})) }}"
         platform_presets: "{{ survey_platform_presets | default(platform_presets | default({})) }}"
+
     # Unified AWX Cloudflare Management Tasks (for include_tasks)
     # Standardizes global/domain settings, manages domains/records, and syncs platforms.
 
