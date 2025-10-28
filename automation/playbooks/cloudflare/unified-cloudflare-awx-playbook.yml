@@ -241,24 +241,8 @@
 
         - name: Critical info summary (concise)
           debug:
-            msg: |-
-              ACTION: {{ cf_action | default('undefined') }}
-              DOMAIN: {{ domain | default('undefined') }}
-              FQDN: {{ fq_record_name | default('') }}
-              TYPE: {{ record_type | default('') }}
-              EFFECTIVE_NAME: {{ effective_record_name | default('') }}
-              RESOLVED_RECORD_ID: {{ record_id | default('not-resolved') }}
-              RECORD_ID_SOURCE: >-
-                {% if record_id is defined and record_id != '' and (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result | length > 0 and record_lookup.json.result[0].id == record_id) %}api-lookup{% elif record_id is defined and record_id != '' %}provided-or-local-scan{% else %}none{% endif %}
-              TTL: {{ numeric_ttl | default('3600') }}
-              PROXIED: {{ global_proxied | default(false) }}
-              PAYLOAD_FILE: /tmp/record_payload_{{ inventory_hostname }}.json
-              RECORDS_SUMMARY: >-
-                {% set rows = [] %}
-                {% for r in (all_records_lookup.json.result if (all_records_lookup is defined and all_records_lookup.json is defined) else [])[:10] %}
-                  {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
-                {% endfor %}
-                {{ rows }}
+            msg: >
+              ACTION: {{ cf_action | default('undefined') }} | DOMAIN: {{ domain | default('undefined') }} | FQDN: {{ fq_record_name | default('') | trim }} | TYPE: {{ record_type | default('') }} | EFFECTIVE_NAME: {{ effective_record_name | default('') }} | RESOLVED_RECORD_ID: {{ record_id | default('not-resolved') }} | RECORD_ID_SOURCE: {% if record_id is defined and record_id != '' and (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result | length > 0 and record_lookup.json.result[0].id == record_id) %}api-lookup{% elif record_id is defined and record_id != '' %}provided-or-local-scan{% else %}none{% endif %} | TTL: {{ numeric_ttl | default('3600') }} | PROXIED: {{ global_proxied | default(false) }} | PAYLOAD_FILE: /tmp/record_payload_{{ inventory_hostname }}.json | RECORDS_SUMMARY: {{ (all_records_lookup.json.result | map(attribute='name') | list)[:10] if (all_records_lookup is defined and all_records_lookup.json is defined) else [] }}
           when: cf_action in ['create_record','update_record','delete_record','clone_record']
 
         - name: Clone record (if requested)
@@ -629,20 +613,25 @@
 
     - name: Output domain settings summary (structured)
       when: domain is defined and domain|length > 0
-      debug:
-        msg: |-
-          DOMAIN SETTINGS SUMMARY
-          -----------------------
-          Domain: {{ domain }}
-          Zone ID: {{ zone_id | default('N/A') }}
-          Zone settings applied:
-          {% if zone_settings_result is defined and zone_settings_result.results is defined %}
-            {% for res in zone_settings_result.results %}
-              - {{ res.item.key }}: {% if res.json is defined and res.json.result is defined and res.json.result.value is defined %}{{ res.json.result.value }}{% elif res.skipped | default(false) %}SKIPPED ({{ res.skip_reason | default('unspecified') }}){% elif res.failed | default(false) %}FAILED{% else %}{{ 'unknown (see full result)' }}{% endif %}
-            {% endfor %}
-          {% else %}
-            - N/A
-          {% endif %}
+      block:
+        - name: Domain settings header
+          debug:
+            msg: |-
+              DOMAIN SETTINGS SUMMARY
+              -----------------------
+              Domain: {{ domain }}
+              Zone ID: {{ zone_id | default('N/A') }}
+
+        - name: Domain zone setting - {{ item.item.key }}
+          debug:
+            msg: >-
+              - {{ item.item.key }}: {% if item.json is defined and item.json.result is defined and item.json.result.value is defined %}{{ item.json.result.value }}{% elif item.skipped | default(false) %}SKIPPED ({{ item.skip_reason | default('unspecified') }}){% elif item.failed | default(false) %}FAILED{% else %}unknown (see full result){% endif %}
+          loop: "{{ zone_settings_result.results if (zone_settings_result is defined and zone_settings_result.results is defined) else [] }}"
+          when: zone_settings_result is defined and zone_settings_result.results is defined
+        - name: Domain zone settings none
+          debug:
+            msg: "- N/A"
+          when: zone_settings_result is not defined or zone_settings_result.results is not defined
 
     - name: Output platform sync summary (structured)
       when: cf_action == 'sync'
