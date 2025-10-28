@@ -128,7 +128,7 @@
                   type: "{{ source_record.type | default(record_type) }}"
                   name: "{{ clone_record_name | default('cloned-' ~ effective_record_name) }}"
                   content: "{{ source_record.content | default(record_value) }}"
-                  ttl: "{{ source_record.ttl | default(numeric_ttl) }}"
+                  ttl: "{{ (source_record.ttl is defined and source_record.ttl|int > 0) | ternary(source_record.ttl|int, numeric_ttl) }}"
                   proxied: "{{ source_record.proxied | default(global_proxied | default(false)) }}"
                 return_content: true
                 validate_certs: false
