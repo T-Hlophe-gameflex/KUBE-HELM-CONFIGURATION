@@ -123,16 +123,18 @@
                 headers:
                   Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
                   Content-Type: "application/json"
-                body_format: json
-                body:
-                  type: "{{ source_record.type | default(record_type) }}"
-                  name: "{{ clone_record_name | default('cloned-' ~ effective_record_name) }}"
-                  content: "{{ source_record.content | default(record_value) }}"
-                  ttl: "{{ source_record.ttl|int if source_record.ttl is defined and source_record.ttl|int > 0 else numeric_ttl|int if numeric_ttl is defined and numeric_ttl|int > 0 else 3600 }}"
-                  proxied: "{{ source_record.proxied | default(global_proxied | default(false)) }}"
+                body: >-
+                  {
+                    "type": "{{ source_record.type | default(record_type) }}",
+                    "name": "{{ clone_record_name | default('cloned-' ~ effective_record_name) }}",
+                    "content": "{{ source_record.content | default(record_value) }}",
+                    "ttl": {{ source_record.ttl|int if source_record.ttl is defined and source_record.ttl|int > 0 else numeric_ttl|int if numeric_ttl is defined and numeric_ttl|int > 0 else 3600 }},
+                    "proxied": {{ (source_record.proxied | default(global_proxied | default(false))) | to_json }}
+                  }
                 return_content: true
                 validate_certs: false
               register: clone_result
+
 
             - name: Output clone operation result
               debug:
@@ -168,16 +170,17 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
               Content-Type: "application/json"
-            body_format: json
-            body:
-              type: "{{ record_type }}"
-              name: "{{ effective_record_name }}"
-              content: "{{ record_value }}"
-              ttl: "{{ numeric_ttl|int if numeric_ttl is defined and numeric_ttl|int > 0 else 3600 }}"
-              proxied: "{{ global_proxied | default(false) }}"
-            return_content: true
-            validate_certs: false
+            body: >-
+              {
+                "type": "{{ record_type }}",
+                "name": "{{ effective_record_name }}",
+                "content": "{{ record_value }}",
+                "ttl": {{ numeric_ttl|int if numeric_ttl is defined and numeric_ttl|int > 0 else 3600 }},
+                "proxied": {{ (global_proxied | default(false)) | to_json }}
+              }
           register: record_result
+
+        # debug payload task removed to avoid YAML parsing issues
         
         - name: Delete record
           when: cf_action == 'delete_record' and record_id
