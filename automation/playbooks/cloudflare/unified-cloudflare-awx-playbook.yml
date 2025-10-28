@@ -247,11 +247,24 @@
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_lookup
           when: record_type is defined and fq_record_name is defined and fq_record_name | length > 0
-        - name: Set record_id fact (prefer API lookup, fallback to scanning listed records)
+        - name: Set record_id from API lookup if available
           set_fact:
-            record_id: >-
-              {{ (record_lookup.json.result[0].id) if (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0) else (
-                 (all_records_lookup.json.result | selectattr('name','equalto', fq_record_name) | selectattr('type','equalto', record_type) | list | first).id if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0 and (all_records_lookup.json.result | selectattr('name','equalto', fq_record_name) | selectattr('type','equalto', record_type) | list | length) > 0) else '' ) }}
+            record_id: "{{ record_lookup.json.result[0].id }}"
+          when: record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0
+
+        - name: Build desired_record_name for local scan (lower-trim)
+          set_fact:
+            desired_record_name: "{{ (fq_record_name | trim | lower) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim | lower) }}"
+
+        - name: Find record_id by scanning all_records_lookup if API lookup missed
+          set_fact:
+            record_id: "{{ item.id }}"
+          loop: "{{ all_records_lookup.json.result | default([]) }}"
+          when:
+            - (record_id is not defined or record_id == '')
+            - (item.name is defined)
+            - "{{ (item.name | trim | lower) == desired_record_name }}"
+            - (item.type == record_type)
         - name: Set numeric TTL for record
           set_fact:
             numeric_ttl: >-
@@ -270,27 +283,32 @@
           set_fact:
             record_payload_json: >-
               {{ ({ 'type': record_type,
-                    'name': (fq_record_name if (fq_record_name is defined and fq_record_name|length > 0) else effective_record_name),
+                    'name': ((fq_record_name if (fq_record_name is defined and fq_record_name|length > 0) else effective_record_name) | trim),
                     'content': (( '"' ~ (record_value|default('') | replace('"','') | trim) ~ '"') if record_type == 'TXT' else (record_value|default(''))),
                     'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) }
                  )
                  | combine({'proxied': (global_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
                  | to_json }}
-          when: not record_payload_template_stat.stat.exists and record_type is defined
+          when: not record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
 
         - name: Write fallback record payload to /tmp (if built)
           copy:
             content: "{{ record_payload_json }}"
             dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
             mode: '0644'
-          when: not record_payload_template_stat.stat.exists
+          when: not record_payload_template_stat.stat.exists and cf_action in ['create_record','update_record','clone_record']
+
+        - name: Ensure effective name used by template is trimmed (payload render)
+          set_fact:
+            effective_record_name: "{{ (fq_record_name | trim) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim) }}"
+          when: cf_action in ['create_record','update_record','clone_record']
 
         - name: Render record payload template to /tmp
           template:
             src: record_payload.json.j2
             dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
             mode: '0644'
-          when: record_payload_template_stat.stat.exists and record_type is defined
+          when: record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
 
         - name: Debug runtime cf_validate_certs value
           debug:
@@ -306,10 +324,10 @@
           register: record_payload_preview
           changed_when: false
           ignore_errors: true
-
         - name: Show rendered record payload preview
           debug:
             var: record_payload_preview.stdout
+          when: cf_action in ['create_record','update_record','clone_record']
 
         - name: Create or update record (send rendered JSON) — attempt uri first (may fail)
           # tolerate failures here so we can fallback to curl and capture Cloudflare's raw response
@@ -325,7 +343,7 @@
             body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
             return_content: true
             validate_certs: true
-          when: (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
+          when: cf_action in ['create_record','update_record'] and (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
           register: record_result
           ignore_errors: yes
 
@@ -337,7 +355,7 @@
               --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
           args:
             executable: /bin/bash
-          when: (record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1)
+          when: cf_action in ['create_record','update_record'] and ((record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1))
           register: record_curl_result
 
         - name: Normalize record_result when fallback curl used
@@ -358,7 +376,7 @@
             body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
             return_content: true
             validate_certs: false
-          when: not (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
+          when: cf_action in ['create_record','update_record'] and not (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
           register: record_result
 
         - name: Create or update record (send rendered JSON) using curl
@@ -369,7 +387,7 @@
               --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
           args:
             executable: /bin/bash
-          when: cf_force_curl | default(false) | bool
+          when: cf_action in ['create_record','update_record'] and (cf_force_curl | default(false) | bool)
           register: record_curl_result
 
         - name: Normalize record_result when using curl
