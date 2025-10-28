@@ -220,6 +220,18 @@
                 dest: "{{ playbook_dir }}/awx_dropdowns/page_rules_templates.json"
                 mode: '0644'
 
+            - name: Write AWX toggle dropdown for page_rules_dry_run
+              copy:
+                content: "[true,false]"
+                dest: "{{ playbook_dir }}/awx_dropdowns/page_rules_dry_run.json"
+                mode: '0644'
+
+            - name: Write AWX toggle dropdown for apply_page_rules
+              copy:
+                content: "[true,false]"
+                dest: "{{ playbook_dir }}/awx_dropdowns/apply_page_rules.json"
+                mode: '0644'
+
             - name: Optionally commit & push dropdown files to repo
               when: update_repo_dropdown_files | default(false)
               block:
@@ -254,21 +266,42 @@
                 validate_certs: "{{ awx_validate_certs | default(true) }}"
               register: awx_job_template
 
-            - name: Build updated survey_spec by replacing choices for selected_domain/selected_record_name
+            - name: Build or extend survey_spec so required questions exist with choices/defaults
               set_fact:
                 awx_survey_spec: >-
-                  {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
-                  {% set questions = spec.spec | default([]) %}
-                  {% for q in questions %}
+                  {% set existing = awx_job_template.json.survey_spec if (awx_job_template is defined and awx_job_template.json is defined and awx_job_template.json.survey_spec is defined) else {'name':'Survey','spec':[]} %}
+                  {% set spec_name = existing.name if existing.name is defined else 'Survey' %}
+                  {% set spec_questions = existing.spec | default([]) %}
+                  {% set qvars = spec_questions | map(attribute='variable') | list %}
+
+                  {# ensure selected_domain question choices updated if present #}
+                  {% set spec_questions = spec_questions | map('combine', {}) | list %}
+                  {% for q in spec_questions %}
                     {% if q.variable == 'selected_domain' %}
                       {% set _ = q.update({'choices': (domains_list | join(','))}) %}
                     {% elif q.variable == 'selected_record_name' %}
                       {% set _ = q.update({'choices': (records_list | join(','))}) %}
                     {% elif q.variable == 'selected_page_rule' %}
                       {% set _ = q.update({'choices': (page_rules_list | join(','))}) %}
+                    {% elif q.variable == 'page_rules_dry_run' %}
+                      {% set _ = q.update({'choices': 'true,false'}) %}
+                    {% elif q.variable == 'apply_page_rules' %}
+                      {% set _ = q.update({'choices': 'true,false'}) %}
                     {% endif %}
                   {% endfor %}
-                  {{ spec }}
+
+                  {# append missing questions with sensible defaults #}
+                  {% if 'selected_page_rule' not in qvars %}
+                    {% set spec_questions = spec_questions + [ { 'question_name':'Page Rule Template','question_description':'Choose a page rule template to apply (or leave empty to auto-apply)','required': False, 'variable':'selected_page_rule', 'choices': (page_rules_list | join(',')) } ] %}
+                  {% endif %}
+                  {% if 'page_rules_dry_run' not in qvars %}
+                    {% set spec_questions = spec_questions + [ { 'question_name':'Page Rules Dry Run','question_description':'Preview page rules without applying (true/false)','required': False, 'variable':'page_rules_dry_run', 'choices': 'true,false', 'default': ('true' if (page_rules_dry_run | default(true) | bool) else 'false') } ] %}
+                  {% endif %}
+                  {% if 'apply_page_rules' not in qvars %}
+                    {% set spec_questions = spec_questions + [ { 'question_name':'Apply Page Rules','question_description':'Actually apply page rules when none selected (true/false)','required': False, 'variable':'apply_page_rules', 'choices': 'true,false', 'default': ('true' if (apply_page_rules | default(true) | bool) else 'false') } ] %}
+                  {% endif %}
+
+                  {{ {'name': spec_name, 'spec': spec_questions} }}
 
             - name: Patch AWX job template with updated survey_spec
               uri:
