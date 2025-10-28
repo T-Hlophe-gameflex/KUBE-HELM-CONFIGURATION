@@ -121,7 +121,7 @@
 
         - name: 
           Debug:
-          msg: List all DNS records before delete
+            msg: List all DNS records before delete
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
             method: GET
