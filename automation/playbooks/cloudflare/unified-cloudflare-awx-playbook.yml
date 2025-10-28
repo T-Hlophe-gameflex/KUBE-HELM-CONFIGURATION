@@ -49,7 +49,8 @@
           register: zone_lookup
         - name: Set zone_id fact
           set_fact:
-            zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
+            zone_id: >-
+              {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
         - name: Apply standard zone settings
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
@@ -82,7 +83,8 @@
           register: zone_lookup
         - name: Set zone_id fact
           set_fact:
-            zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
+            zone_id: >-
+              {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
         - name: List all DNS records for this domain (debug)
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
@@ -124,10 +126,16 @@
           debug:
             msg: >-
               {% set rows = [] %}
-              {% for r in all_records_lookup.json.result %}
+              {% for r in (all_records_lookup.json.result if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined) else []) %}
                 {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
               {% endfor %}
               {{ rows }}
+          when: all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined
+
+        - name: No DNS records fetched (debug fallback)
+          debug:
+            msg: "No DNS records were fetched for domain {{ domain }} (no zone_id or API access)"
+          when: not (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined) and (debug_curl | default(false))
 
         - name: Optionally show full DNS records JSON when debug_curl is true
           debug:
@@ -302,43 +310,11 @@
                       - page_rules_templates | length > 0
 
                 - name: Iterate page_rules_templates and POST each to Cloudflare (or dry-run)
-                  include_tasks: /dev/null
-                  vars:
-                    _page_rules_to_apply: "{{ page_rules_templates }}"
-                  loop: "{{ _page_rules_to_apply }}"
+                  include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
+                  loop: "{{ page_rules_templates }}"
                   loop_control:
                     loop_var: pr_template
                   when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
-                  block:
-                    - name: Build page rule payload for template
-                      set_fact:
-                        _pr_payload: >-
-                          {{ {'targets': pr_template.targets, 'actions': pr_template.actions, 'priority': pr_template.priority | default(1), 'status': pr_template.status | default('active')} }}
-
-                    - name: Show page rule payload (preview)
-                      debug:
-                        msg: >-
-                          PAGE_RULE_PAYLOAD | Template={{ pr_template.name }} | Payload={{ _pr_payload }}
-
-                    - name: POST page rule to Cloudflare (when not dry-run and apply_page_rules=true)
-                      uri:
-                        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/pagerules"
-                        method: POST
-                        headers:
-                          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-                          Content-Type: "application/json"
-                        body_format: json
-                        body: "{{ _pr_payload }}"
-                        return_content: true
-                        validate_certs: "{{ cf_validate_certs | default(true) }}"
-                      when: (page_rules_dry_run | default(true)) == false and (apply_page_rules | default(false)) == true
-                      register: _pr_post_result
-                      failed_when: false
-
-                    - name: Record result of page rule POST
-                      set_fact:
-                        page_rules_apply_results: >-
-                          {{ (page_rules_apply_results | default([])) + [{ 'template': pr_template.name, 'result': (_pr_post_result.json if (_pr_post_result is defined and _pr_post_result.json is defined) else {'status': 'skipped-or-failed','raw': _pr_post_result | default({})}) }] }}
 
               rescue:
                 - name: Warn that page_rules application step failed
@@ -640,6 +616,57 @@
             msg: >-
               CF_RESPONSE_JSON={{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout if (record_curl_result is defined and record_curl_result.stdout is defined) else 'none') }}
           when: (record_result is defined and (record_result.json is not defined or record_result.json.success is not defined or record_result.json.success == false)) or (debug_curl | default(false))
+
+        - name: Build normalized CF record response object for idempotency checks
+          set_fact:
+            cf_record_response: >-
+              {{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout | default('') | from_json if (record_curl_result is defined and record_curl_result.stdout is defined and record_curl_result.stdout|length > 0) else {}) }}
+          when: cf_action == 'create_record'
+
+        - name: Detect duplicate-record error (Cloudflare 81058)
+          set_fact:
+            cf_duplicate_error: >-
+              {{ (cf_record_response.errors is defined and (81058 in (cf_record_response.errors | map(attribute='code') | list))) if (cf_record_response is defined) else false }}
+          when: cf_action == 'create_record'
+
+        - name: Lookup existing record ID when duplicate detected
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name | urlencode }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          register: duplicate_lookup
+          when: cf_action == 'create_record' and cf_duplicate_error | default(false)
+          failed_when: false
+
+        - name: Set record_id from duplicate lookup (create->update conversion)
+          set_fact:
+            record_id: >-
+              {{ (duplicate_lookup.json.result[0].id) if (duplicate_lookup is defined and duplicate_lookup.json is defined and duplicate_lookup.json.result is defined and duplicate_lookup.json.result|length > 0) else record_id | default('') }}
+          when: cf_action == 'create_record' and cf_duplicate_error | default(false)
+
+        - name: Attempt update when duplicate found (create->update idempotency)
+          uri:
+            url: >-
+              https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}
+            method: PUT
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+              Content-Type: "application/json"
+            body_format: raw
+            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          when: cf_action == 'create_record' and cf_duplicate_error | default(false) and record_id is defined and record_id | length > 0
+          register: record_result_update
+          failed_when: false
+
+        - name: Merge update result into record_result when update attempted
+          set_fact:
+            record_result: "{{ record_result_update }}"
+          when: cf_action == 'create_record' and cf_duplicate_error | default(false) and record_result_update is defined
 
         - name: Create or update record (send rendered JSON) — without cert validation (uri)
           uri:
