@@ -128,14 +128,7 @@
                   type: "{{ source_record.type | default(record_type) }}"
                   name: "{{ clone_record_name | default('cloned-' ~ effective_record_name) }}"
                   content: "{{ source_record.content | default(record_value) }}"
-                  ttl: >-
-                    {% if source_record.ttl is defined and source_record.ttl|int > 0 %}
-                      {{ source_record.ttl|int }}
-                    {% elif numeric_ttl is defined and numeric_ttl|int > 0 %}
-                      {{ numeric_ttl|int }}
-                    {% else %}
-                      3600
-                    {% endif %}
+                  ttl: {{ source_record.ttl|int if source_record.ttl is defined and source_record.ttl|int > 0 else numeric_ttl|int if numeric_ttl is defined and numeric_ttl|int > 0 else 3600 }}
                   proxied: "{{ source_record.proxied | default(global_proxied | default(false)) }}"
                 return_content: true
                 validate_certs: false
@@ -180,12 +173,7 @@
               type: "{{ record_type }}"
               name: "{{ effective_record_name }}"
               content: "{{ record_value }}"
-              ttl: >-
-                {% if numeric_ttl is defined and numeric_ttl|int > 0 %}
-                  {{ numeric_ttl|int }}
-                {% else %}
-                  3600
-                {% endif %}
+              ttl: {{ numeric_ttl|int if numeric_ttl is defined and numeric_ttl|int > 0 else 3600 }}
               proxied: "{{ global_proxied | default(false) }}"
             return_content: true
             validate_certs: false
