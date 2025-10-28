@@ -204,23 +204,6 @@
             msg: >-
               {{ record_result.json if cf_action in ['create_record', 'update_record'] else delete_result.json if cf_action == 'delete_record' else 'No action performed.' }}
 
-    # Output summary of all actions
-    - name: Output summary of all actions
-      debug:
-        msg: "Unified playbook completed. See above for detailed results."
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            body_format: json
-            body:
-              value: "{{ item.value }}"
-            return_content: true
-            validate_certs: false
-          loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
-          register: zone_settings_result
-        - name: Output zone settings result
-          debug:
-            var: zone_settings_result.results
 
     - name: Manage DNS record (create/update/delete)
       when: cf_action in ['create_record', 'update_record', 'delete_record']
@@ -321,6 +304,7 @@
       debug:
         msg: |
           Platform sync applied to all domains. Standard records: {{ standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}]) }}
+
 
     - name: Output summary of all actions
       debug:
