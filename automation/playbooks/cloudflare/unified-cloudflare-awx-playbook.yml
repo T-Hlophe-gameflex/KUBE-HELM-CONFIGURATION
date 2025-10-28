@@ -28,7 +28,7 @@
               name: "{{ domain }}"
               jump_start: true
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: create_zone_result
         - name: Output zone creation result
           debug:
@@ -44,7 +44,7 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: zone_lookup
         - name: Set zone_id fact
           set_fact:
@@ -60,7 +60,7 @@
             body:
               value: "{{ item.value }}"
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
           register: zone_settings_result
         - name: Output zone settings result
@@ -77,7 +77,7 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: zone_lookup
         - name: Set zone_id fact
           set_fact:
@@ -109,7 +109,7 @@
                 headers:
                   Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
                 return_content: true
-                validate_certs: false
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
               register: source_record_lookup
 
             - name: Set source_record fact
@@ -133,7 +133,7 @@
                 # validate JSON payload before sending
                 body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') }}"
                 return_content: true
-                validate_certs: false
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
               register: clone_result
 
             - name: Validate clone JSON payload (python)
@@ -180,7 +180,7 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_lookup
         - name: Set record_id fact
           set_fact:
@@ -221,7 +221,7 @@
             # validate JSON payload before sending
             body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_result
 
         - name: Validate record JSON payload (python)
@@ -266,7 +266,7 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
-            validate_certs: false
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: delete_result
         - name: Output record operation result
           debug:
@@ -297,6 +297,7 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: all_zones
         - name: Apply standard records to each zone
           include_tasks: apply-standard-records.yml
