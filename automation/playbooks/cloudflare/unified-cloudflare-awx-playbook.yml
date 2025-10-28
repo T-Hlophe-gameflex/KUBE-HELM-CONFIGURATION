@@ -115,19 +115,6 @@
           debug:
             msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
 
-        - name: List all DNS records before delete
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: false
-          register: all_records_before_delete
-
-        - name: Output all DNS records before delete
-          debug:
-            var: all_records_before_delete.json.result
         - name: Create or update record
           when: cf_action in ['create_record', 'update_record']
           uri:
@@ -147,7 +134,7 @@
             return_content: true
             validate_certs: false
           register: record_result
-        # ...existing code...
+        
         - name: Delete record
           when: cf_action == 'delete_record' and record_id
           uri:
