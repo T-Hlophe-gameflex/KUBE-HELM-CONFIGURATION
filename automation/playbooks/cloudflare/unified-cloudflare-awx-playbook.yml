@@ -226,7 +226,7 @@
           when: record_type is defined and effective_record_name is defined and effective_record_name | length > 0
         - name: Set record_id fact
           set_fact:
-            record_id: "{{ record_lookup.json.result[0].id if record_lookup.json.result|length > 0 else '' }}"
+            record_id: "{{ (record_lookup.json.result[0].id) if (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0) else '' }}"
         - name: Set numeric TTL for record
           set_fact:
             numeric_ttl: >-
