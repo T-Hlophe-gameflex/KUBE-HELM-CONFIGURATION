@@ -3,10 +3,6 @@
   connection: local
   gather_facts: false
   tasks:
-    # Unified AWX Cloudflare Management Tasks (for include_tasks)
-    # Standardizes global/domain settings, manages domains/records, and syncs platforms.
-
-    # Actions are selected via survey (AWX extra_vars)
 
     - name: Debug Cloudflare API token (for troubleshooting only)
       debug:
@@ -151,6 +147,7 @@
             return_content: true
             validate_certs: false
           register: record_result
+        # ...existing code...
         - name: Delete record
           when: cf_action == 'delete_record' and record_id
           uri:
