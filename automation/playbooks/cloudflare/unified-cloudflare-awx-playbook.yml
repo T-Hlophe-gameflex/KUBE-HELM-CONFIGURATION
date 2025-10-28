@@ -615,28 +615,55 @@
           loop_control:
             loop_var: zone
 
-    - name: Output global settings summary
+    - name: Output global settings summary (structured)
       debug:
-        msg: |
-          Global settings applied:
-          TTL: {{ global_ttl | default(3600) }}
-          Proxied: {{ global_proxied | default(false) }}
-          Zone settings: {{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) }}
+        msg: |-
+          GLOBAL SETTINGS SUMMARY
+          -----------------------
+          TTL (default): {{ global_ttl | default(3600) }}
+          Proxied by default: {{ global_proxied | default(false) }}
+          Standard zone settings:
+          {% for k, v in (standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) ) | dict2items %}
+            - {{ k }}: {{ v }}
+          {% endfor %}
 
-    - name: Output domain settings summary
+    - name: Output domain settings summary (structured)
       when: domain is defined and domain|length > 0
       debug:
-        msg: |
+        msg: |-
+          DOMAIN SETTINGS SUMMARY
+          -----------------------
           Domain: {{ domain }}
           Zone ID: {{ zone_id | default('N/A') }}
-          Zone settings applied: {{ zone_settings_result.results if zone_settings_result is defined else 'N/A' }}
+          Zone settings applied:
+          {% if zone_settings_result is defined and zone_settings_result.results is defined %}
+            {% for res in zone_settings_result.results %}
+              - {{ res.item.key }}: {{ res.json.result.value if (res.json is defined and res.json.result is defined) else res }}
+            {% endfor %}
+          {% else %}
+            - N/A
+          {% endif %}
 
-    - name: Output platform sync summary
+    - name: Output platform sync summary (structured)
       when: cf_action == 'sync'
       debug:
-        msg: |
-          Platform sync applied to all domains. Standard records: {{ standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}]) }}
+        msg: |-
+          PLATFORM SYNC SUMMARY
+          ---------------------
+          Applied standard records to all domains.
+          Standard records:
+          {% for r in (standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}])) %}
+            - type: {{ r.type }}, name: {{ r.name }}, value: {{ r.value }}, ttl: {{ r.ttl }}, proxied: {{ r.proxied }}
+          {% endfor %}
 
-    - name: Output summary of all actions
+    - name: Output summary of all actions (structured)
       debug:
-        msg: "Unified playbook completed. See above for detailed results."
+        msg: |-
+          UNIFIED PLAYBOOK SUMMARY
+          ------------------------
+          Action: {{ cf_action | default('N/A') }}
+          Domain: {{ domain | default('N/A') }}
+          FQDN (if applicable): {{ fq_record_name | default('N/A') }}
+          Record Type: {{ record_type | default('N/A') }}
+          Resolved Record ID: {{ record_id | default('N/A') }}
+          See earlier sections for detailed per-step outputs and payload files under /tmp/record_payload_{{ inventory_hostname }}.json
