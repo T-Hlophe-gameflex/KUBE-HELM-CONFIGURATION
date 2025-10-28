@@ -1,25 +1,13 @@
+
 ---
 - hosts: localhost
   gather_facts: false
-  connection: local
   tasks:
-    - name: Map survey variables -> playbook variables
-      set_fact:
-        domain: "{{ survey_domain | default(domain | default('')) }}"
-        cf_action: "{{ survey_action | default(cf_action | default('')) }}"
-        record_name: "{{ survey_record_name | default(record_name | default('')) }}"
-        record_type: "{{ survey_record_type | default(record_type | default('A')) }}"
-        record_value: "{{ survey_record_value | default(record_value | default('')) }}"
-        global_ttl: "auto"
-        global_proxied: true
-        record_priority: "{{ survey_record_priority | default(record_priority | default('')) }}"
-        dry_run: "{{ survey_dry_run | default(dry_run | default('false')) }}"
-        record_keys: "{{ survey_record_keys | default(record_keys | default([])) }}"
-        selected_record_keys: "{{ survey_selected_record_keys | default(selected_record_keys | default(record_keys | default([]))) }}"
-        standard_records: "{{ survey_standard_records | default(standard_records | default({})) }}"
-        platform_presets: "{{ survey_platform_presets | default(platform_presets | default({})) }}"
+    # Unified AWX Cloudflare Management Tasks (for include_tasks)
+    # Standardizes global/domain settings, manages domains/records, and syncs platforms.
 
-    # Unified AWX Cloudflare Management Tasks
+    # Actions are selected via survey (AWX extra_vars)
+
     - name: Debug Cloudflare API token (for troubleshooting only)
       debug:
         msg: "CLOUDFLARE_API_TOKEN = {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
@@ -29,7 +17,6 @@
       debug:
         msg: "Action: {{ cf_action }}, Domain: {{ domain }}, Record: {{ record_name }} ({{ record_type }})"
 
-    # Create domain (zone)
     - name: Create domain (zone) if requested
       when: cf_action == 'create_domain'
       block:
@@ -51,9 +38,8 @@
           debug:
             var: create_zone_result.json
 
-    # Standardize settings for a domain
-    - name: Standardize domain settings
-      when: cf_action in ['create_domain', 'standardize_domain']
+    - name: Standardize domain settings (always runs after create_domain or on demand)
+      when: cf_action in ['create_domain', 'standardize', 'sync']
       block:
         - name: Get zone ID for domain
           uri:
@@ -64,11 +50,9 @@
             return_content: true
             validate_certs: false
           register: zone_lookup
-
         - name: Set zone_id fact
           set_fact:
             zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
-
         - name: Apply standard zone settings
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
@@ -81,129 +65,11 @@
               value: "{{ item.value }}"
             return_content: true
             validate_certs: false
-          loop: "{{ {'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'} | dict2items }}"
+          loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
           register: zone_settings_result
-
         - name: Output zone settings result
           debug:
             var: zone_settings_result.results
-
-    # Standardize settings globally (all domains)
-    - name: Standardize global settings
-      when: cf_action == 'standardize_global'
-      block:
-        - name: Get all zones
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: false
-          register: all_zones
-        - name: Apply standard settings to each domain
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ item.id }}/settings/{{ setting.key }}"
-            method: PATCH
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            body_format: json
-            body:
-              value: "{{ setting.value }}"
-            return_content: true
-            validate_certs: false
-          loop: "{{ all_zones.json.result | product([{'key': 'always_use_https', 'value': true}, {'key': 'min_tls_version', 'value': '1.2'}, {'key': 'cache_level', 'value': 'standard'}]) | list }}"
-          loop_control:
-            label: "{{ item.0.name }} -> {{ item.1.key }}"
-          vars:
-            setting: "{{ item.1 }}"
-          register: global_settings_result
-        - name: Output global settings result
-          debug:
-            var: global_settings_result.results
-
-    # Platform sync (standard records to all domains)
-    - name: Platform sync records
-      when: cf_action == 'platform_sync'
-      block:
-        - name: Get all zones
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: false
-          register: all_zones
-        - name: Apply standard records to each zone
-          include_tasks: apply-standard-records.yml
-          loop: "{{ all_zones.json.result }}"
-          loop_control:
-            loop_var: zone
-
-    # Manage DNS record (create/update/delete)
-    - name: Manage DNS record
-      when: cf_action in ['create_record', 'update_record', 'delete_record']
-      block:
-        - name: Get zone ID for domain
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: false
-          register: zone_lookup
-        - name: Set zone_id fact
-          set_fact:
-            zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
-        - name: Find existing record (if any)
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}.{{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: false
-          register: record_lookup
-        - name: Set record_id fact
-          set_fact:
-            record_id: "{{ record_lookup.json.result[0].id if record_lookup.json.result|length > 0 else '' }}"
-        - name: Create or update record
-          when: cf_action in ['create_record', 'update_record']
-          uri:
-            url: >-
-              https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}
-            method: "{{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }}"
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            body_format: json
-            body:
-              type: "{{ record_type }}"
-              name: "{{ record_name }}.{{ domain }}"
-              content: "{{ record_value }}"
-              ttl: "{{ 1 if global_ttl == 'auto' else global_ttl }}"
-              proxied: true
-            return_content: true
-            validate_certs: false
-          register: record_result
-        - name: Delete record
-          when: cf_action == 'delete_record' and record_id
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
-            method: DELETE
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: false
-          register: delete_result
-        - name: Output record operation result
-          debug:
-            msg: >-
-              {{ record_result.json if cf_action in ['create_record', 'update_record'] else delete_result.json if cf_action == 'delete_record' else 'No action performed.' }}
-
 
     - name: Manage DNS record (create/update/delete)
       when: cf_action in ['create_record', 'update_record', 'delete_record']
@@ -304,7 +170,6 @@
       debug:
         msg: |
           Platform sync applied to all domains. Standard records: {{ standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}]) }}
-
 
     - name: Output summary of all actions
       debug:
