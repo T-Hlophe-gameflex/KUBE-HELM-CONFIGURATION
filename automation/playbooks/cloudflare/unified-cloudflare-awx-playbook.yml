@@ -11,7 +11,7 @@
 
     - name: Show selected action and input
       debug:
-        msg: "Action: {{ cf_action }}, Domain: {{ domain }}, Record: {{ record_name }} ({{ record_type }})"
+        msg: "Action: {{ cf_action | default('undefined') }}, Domain: {{ domain | default('undefined') }}, Record: {{ record_name | default(selected_record_name | default('undefined')) }} ({{ record_type | default('undefined') }})"
 
     - name: Create domain (zone) if requested
       when: cf_action == 'create_domain'
