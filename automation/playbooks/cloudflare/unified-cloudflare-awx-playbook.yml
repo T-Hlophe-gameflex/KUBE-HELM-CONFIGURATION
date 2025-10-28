@@ -117,6 +117,16 @@
                 source_record: "{{ source_record_lookup.json.result[0] if source_record_lookup.json.result|length > 0 else {} }}"
 
 
+            - name: Ensure clone payload template exists in project
+              stat:
+                path: "{{ playbook_dir }}/templates/clone_payload.json.j2"
+              register: clone_payload_template_stat
+
+            - name: Fail if clone payload template missing (AWX project sync may be needed)
+              fail:
+                msg: "Template clone_payload.json.j2 not found in project path {{ playbook_dir }}/templates. Please sync the AWX project or add the template file."
+              when: not clone_payload_template_stat.stat.exists
+
             - name: Render clone payload template to /tmp
               template:
                 src: clone_payload.json.j2
@@ -210,6 +220,16 @@
         - name: Debug numeric TTL value
           debug:
             msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
+
+        - name: Ensure record payload template exists in project
+          stat:
+            path: "{{ playbook_dir }}/templates/record_payload.json.j2"
+          register: record_payload_template_stat
+
+        - name: Fail if record payload template missing (AWX project sync may be needed)
+          fail:
+            msg: "Template record_payload.json.j2 not found in project path {{ playbook_dir }}/templates. Please sync the AWX project or add the template file."
+          when: not record_payload_template_stat.stat.exists
 
         - name: Render record payload template to /tmp
           template:
