@@ -281,7 +281,7 @@
           debug:
             var: record_payload_preview.stdout
 
-        - name: Create or update record (send rendered JSON) — with certs validated (uri)
+        - name: Create or update record (send rendered JSON) — attempt uri first (may fail)
           uri:
             url: >-
               https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}
@@ -296,6 +296,22 @@
             validate_certs: true
           when: (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
           register: record_result
+
+        - name: Fallback to curl if uri call failed
+          shell: >-
+            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}" \
+              -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
+              -H "Content-Type: application/json" \
+              --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
+          args:
+            executable: /bin/bash
+          when: (record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1)
+          register: record_curl_result
+
+        - name: Normalize record_result when fallback curl used
+          set_fact:
+            record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
+          when: record_curl_result is defined and record_curl_result.stdout is defined
 
         - name: Create or update record (send rendered JSON) — without cert validation (uri)
           uri:
