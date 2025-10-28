@@ -256,7 +256,11 @@
         - name: Build fallback record payload JSON from variables (if template missing)
           set_fact:
             record_payload_json: >-
-              {{ ({ 'type': record_type, 'name': effective_record_name, 'content': record_value, 'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) } )
+              {{ ({ 'type': record_type,
+                    'name': (fq_record_name if (fq_record_name is defined and fq_record_name|length > 0) else effective_record_name),
+                    'content': (( '"' ~ (record_value|default('') | replace('"','') | trim) ~ '"') if record_type == 'TXT' else (record_value|default(''))),
+                    'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) }
+                 )
                  | combine({'proxied': (global_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
                  | to_json }}
           when: not record_payload_template_stat.stat.exists and record_type is defined
