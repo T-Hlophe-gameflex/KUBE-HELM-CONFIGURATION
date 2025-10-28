@@ -223,6 +223,7 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_lookup
+          when: record_type is defined and effective_record_name is defined and effective_record_name | length > 0
         - name: Set record_id fact
           set_fact:
             record_id: "{{ record_lookup.json.result[0].id if record_lookup.json.result|length > 0 else '' }}"
@@ -246,7 +247,7 @@
               {{ ({ 'type': record_type, 'name': effective_record_name, 'content': record_value, 'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) } )
                  | combine({'proxied': (global_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
                  | to_json }}
-          when: not record_payload_template_stat.stat.exists
+          when: not record_payload_template_stat.stat.exists and record_type is defined
 
         - name: Write fallback record payload to /tmp (if built)
           copy:
@@ -260,7 +261,7 @@
             src: record_payload.json.j2
             dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
             mode: '0644'
-          when: record_payload_template_stat.stat.exists
+          when: record_payload_template_stat.stat.exists and record_type is defined
 
         - name: Debug runtime cf_validate_certs value
           debug:
