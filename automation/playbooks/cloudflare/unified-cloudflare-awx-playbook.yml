@@ -92,6 +92,17 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: all_records_lookup
+
+        - name: Get page rules for this domain (if zone_id available)
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/pagerules"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          register: page_rules_lookup
+          when: zone_id is defined and zone_id | length > 0
         - name: Ensure record_id has a default (allow passing record_id directly)
           set_fact:
             record_id: "{{ record_id | default('') }}"
@@ -470,6 +481,11 @@
           register: record_result
           ignore_errors: yes
 
+        - name: Validate CNAME target is not an IP address
+          fail:
+            msg: "CNAME record value looks like an IP ({{ record_value }}). CNAME must point to a hostname or FQDN. Use A/AAAA for IP addresses."
+          when: record_type == 'CNAME' and (record_value is defined and record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$'))
+
         - name: Fallback to curl if uri call failed
           shell: >-
             curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}" \
@@ -485,6 +501,12 @@
           set_fact:
             record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
           when: record_curl_result is defined and record_curl_result.stdout is defined
+
+        - name: Debug Cloudflare response when record result unknown or on debug
+          debug:
+            msg: >-
+              CF_RESPONSE_JSON={{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout if (record_curl_result is defined and record_curl_result.stdout is defined) else 'none') }}
+          when: (record_result is defined and (record_result.json is not defined or record_result.json.success is not defined or record_result.json.success == false)) or (debug_curl | default(false))
 
         - name: Create or update record (send rendered JSON) — without cert validation (uri)
           uri:
@@ -596,7 +618,7 @@
         - name: Domain settings header (single-line)
           debug:
             msg: >-
-              DOMAIN | {{ domain }} | ZoneID={{ zone_id | default('N/A') }}
+              DOMAIN | {{ domain }} | ZoneID={{ zone_id | default('N/A') }} | PageRulesCount={{ (page_rules_lookup.json.result | length) if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.result is defined) else 0 }} | PageRules={{ (page_rules_lookup.json.result | map(attribute='id') | list) | join(',') if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.result is defined) else 'none' }}
 
         - name: Domain zone setting - {{ item.item.key }}
           debug:
