@@ -114,7 +114,7 @@
         - name: Set numeric TTL for record
           set_fact:
             numeric_ttl: >-
-              {{ (global_ttl is defined and global_ttl|string|int > 0) | ternary(global_ttl|string|int, 3600) if global_ttl != 'auto' else 3600 }}
+              {% if global_ttl is defined and global_ttl is string and global_ttl|int > 0 %}{{ global_ttl|int }}{% elif global_ttl is defined and global_ttl is number and global_ttl > 0 %}{{ global_ttl }}{% else %}3600{% endif %}
         - name: Create or update record
           when: cf_action in ['create_record', 'update_record']
           uri:
