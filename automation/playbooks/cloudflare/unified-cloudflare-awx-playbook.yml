@@ -99,14 +99,25 @@
             effective_record_name: >-
               {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
 
-        - name: Trim effective_record_name and build fully-qualified name
+        - name: Trim and normalize effective_record_name (strip quotes, collapse spaces)
           set_fact:
-            effective_record_name: "{{ effective_record_name | default('') | trim }}"
+            effective_record_name: >-
+              {{ effective_record_name | default('') | trim
+                 | replace('\"','')
+                 | replace("'", '')
+                 | regex_replace('\\s+',' ') }}
+
         - name: Build fully-qualified record name (append domain if needed)
           set_fact:
             fq_record_name: >-
               {% if effective_record_name is defined and effective_record_name | length > 0 %}
-                {% if effective_record_name | regex_search('\.' ~ domain ~ '$') %}{{ effective_record_name }}{% else %}{{ effective_record_name ~ '.' ~ domain }}{% endif %}
+                {% if effective_record_name | regex_search('\.' ~ domain ~ '$') %}
+                  {{ effective_record_name | trim }}
+                {% elif effective_record_name == '@' %}
+                  {{ domain }}
+                {% else %}
+                  {{ (effective_record_name | trim) ~ '.' ~ domain }}
+                {% endif %}
               {% else %}
                 ''
               {% endif %}
@@ -236,9 +247,11 @@
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_lookup
           when: record_type is defined and fq_record_name is defined and fq_record_name | length > 0
-        - name: Set record_id fact
+        - name: Set record_id fact (prefer API lookup, fallback to scanning listed records)
           set_fact:
-            record_id: "{{ (record_lookup.json.result[0].id) if (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0) else '' }}"
+            record_id: >-
+              {{ (record_lookup.json.result[0].id) if (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0) else (
+                 (all_records_lookup.json.result | selectattr('name','equalto', fq_record_name) | selectattr('type','equalto', record_type) | list | first).id if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0 and (all_records_lookup.json.result | selectattr('name','equalto', fq_record_name) | selectattr('type','equalto', record_type) | list | length) > 0) else '' ) }}
         - name: Set numeric TTL for record
           set_fact:
             numeric_ttl: >-
