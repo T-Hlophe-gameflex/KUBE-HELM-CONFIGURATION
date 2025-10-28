@@ -101,7 +101,7 @@
             var: all_records_lookup.json.result
         - name: Find existing record (if any)
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}.{{ domain }}"
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}"
             method: GET
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
@@ -111,6 +111,10 @@
         - name: Set record_id fact
           set_fact:
             record_id: "{{ record_lookup.json.result[0].id if record_lookup.json.result|length > 0 else '' }}"
+        - name: Set numeric TTL for record
+          set_fact:
+            numeric_ttl: >-
+              {{ (global_ttl is defined and global_ttl|string|int > 0) | ternary(global_ttl|string|int, 3600) if global_ttl != 'auto' else 3600 }}
         - name: Create or update record
           when: cf_action in ['create_record', 'update_record']
           uri:
@@ -123,9 +127,9 @@
             body_format: json
             body:
               type: "{{ record_type }}"
-              name: "{{ record_name }}.{{ domain }}"
+              name: "{{ record_name }}"
               content: "{{ record_value }}"
-              ttl: "{{ global_ttl | default(3600) }}"
+              ttl: "{{ numeric_ttl }}"
               proxied: "{{ global_proxied | default(false) }}"
             return_content: true
             validate_certs: false
