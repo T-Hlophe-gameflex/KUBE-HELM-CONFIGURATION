@@ -94,9 +94,14 @@
         - name: Output all DNS records for this domain (debug)
           debug:
             var: all_records_lookup.json.result
+        - name: Set effective record name (from dropdown or input)
+          set_fact:
+            effective_record_name: >-
+              {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
+
         - name: Find existing record (if any)
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ record_name }}"
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ effective_record_name }}"
             method: GET
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
