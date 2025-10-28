@@ -68,7 +68,7 @@
             var: zone_settings_result.results
 
     - name: Manage DNS record (create/update/delete)
-      when: cf_action in ['create_record', 'update_record', 'delete_record']
+      when: cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
       block:
         - name: Get zone ID for domain
           uri:
@@ -94,6 +94,11 @@
         - name: Output all DNS records for this domain (debug)
           debug:
             var: all_records_lookup.json.result
+        - name: Set effective record name (from dropdown or input)
+          set_fact:
+            effective_record_name: >-
+              {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
+
         - name: Clone record (if requested)
           when: cf_action == 'clone_record'
           block:
@@ -132,9 +137,6 @@
             - name: Output clone operation result
               debug:
                 var: clone_result.json
-          set_fact:
-            effective_record_name: >-
-              {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
 
         - name: Find existing record (if any)
           uri:
