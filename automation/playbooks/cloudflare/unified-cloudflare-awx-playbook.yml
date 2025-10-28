@@ -9,75 +9,8 @@
       fail:
         msg: "cf_action variable is required to launch this playbook. Please provide it via AWX survey or extra_vars."
       when: cf_action is not defined
+
   tasks:
-    - name: Build page rule dropdown JSON (friendly names)
-      set_fact:
-        page_rule_dropdown_list: >-
-          {{ page_rules_map.keys() | list if page_rules_map is defined else [] }}
-
-    - name: Write page rule dropdown JSON
-      copy:
-        content: "{{ page_rule_dropdown_list | to_json }}"
-        dest: "{{ playbook_dir }}/awx_dropdowns/page_rules.json"
-        mode: '0644'
-
-    - name: Optionally PATCH AWX job template survey questions with page rule choices
-      when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
-      block:
-        - name: Get current AWX job template
-          uri:
-            url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ awx_token }}"
-              Content-Type: "application/json"
-            return_content: true
-            validate_certs: "{{ awx_validate_certs | default(true) }}"
-          register: awx_job_template
-
-        - name: Build updated survey_spec by replacing choices for selected_page_rule
-          set_fact:
-            awx_survey_spec: >-
-              {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
-              {% set questions = spec.spec | default([]) %}
-              {% for q in questions %}
-                        {% if q.variable == 'selected_page_rule' %}
-                          {% set _ = q.update({'choices': (page_rule_dropdown_list | join(','))}) %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ spec }}
-
-                - name: Patch AWX job template with updated survey_spec (page rules)
-                  uri:
-                    url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
-                    method: PATCH
-                    headers:
-                      Authorization: "Bearer {{ awx_token }}"
-                      Content-Type: "application/json"
-                    body_format: json
-                    body:
-                      survey_enabled: true
-                      survey_spec: "{{ awx_survey_spec }}"
-                    return_content: true
-                    validate_certs: "{{ awx_validate_certs | default(true) }}"
-                  register: awx_patch_result
-              rescue:
-
-        - name: Warn AWX survey update failed (page rules)
-          debug:
-            msg: "AWX survey update for page rules failed or was not possible; check AWX API settings or token"
-
-    - name: Check Cloudflare token type for page rules
-      fail:
-        msg: "Cloudflare API token is account-level. Page Rules endpoint requires a zone-level token. Please create a token with zone:read and zone:edit permissions."
-      when: page_rules_error_code == '1011'
-
-    - name: Set existing_count fact for page rules
-      set_fact:
-        existing_count: "{{ page_rules_count | default(0) }}"
-        page_rules_error_code: "{{ page_rules_lookup.json.errors[0].code if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 else '' }}"
-        page_rules_error_msg: "{{ page_rules_lookup.json.errors[0].message if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 else '' }}"
-      when: zone_id is defined and zone_id | length > 0
 
     - name: Ensure record_id has a default (allow passing record_id directly)
       set_fact:
