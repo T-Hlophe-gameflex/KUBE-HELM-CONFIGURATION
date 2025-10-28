@@ -119,9 +119,7 @@
           debug:
             msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
 
-        - name: 
-          Debug:
-            msg: List all DNS records before delete
+        - name: List all DNS records before delete
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
             method: GET
