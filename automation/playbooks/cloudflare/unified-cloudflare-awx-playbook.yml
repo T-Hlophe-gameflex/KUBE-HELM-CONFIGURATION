@@ -638,7 +638,7 @@
           Zone settings applied:
           {% if zone_settings_result is defined and zone_settings_result.results is defined %}
             {% for res in zone_settings_result.results %}
-              - {{ res.item.key }}: {{ res.json.result.value if (res.json is defined and res.json.result is defined) else res }}
+              - {{ res.item.key }}: {% if res.json is defined and res.json.result is defined and res.json.result.value is defined %}{{ res.json.result.value }}{% elif res.skipped | default(false) %}SKIPPED ({{ res.skip_reason | default('unspecified') }}){% elif res.failed | default(false) %}FAILED{% else %}{{ 'unknown (see full result)' }}{% endif %}
             {% endfor %}
           {% else %}
             - N/A
@@ -663,7 +663,7 @@
           ------------------------
           Action: {{ cf_action | default('N/A') }}
           Domain: {{ domain | default('N/A') }}
-          FQDN (if applicable): {{ fq_record_name | default('N/A') }}
+          FQDN (if applicable): {{ fq_record_name | default('N/A') | trim }}
           Record Type: {{ record_type | default('N/A') }}
           Resolved Record ID: {{ record_id | default('N/A') }}
           See earlier sections for detailed per-step outputs and payload files under /tmp/record_payload_{{ inventory_hostname }}.json
