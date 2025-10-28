@@ -2,539 +2,313 @@
 - hosts: localhost
   connection: local
   gather_facts: false
+  vars_files:
+    - vars/page_rules_map.yml
+  pre_tasks:
+    - name: Fail if cf_action is not provided
+      fail:
+        msg: "cf_action variable is required to launch this playbook. Please provide it via AWX survey or extra_vars."
+      when: cf_action is not defined
   tasks:
+    - name: Build page rule dropdown JSON (friendly names)
+      set_fact:
+        page_rule_dropdown_list: >-
+          {{ page_rules_map.keys() | list if page_rules_map is defined else [] }}
 
-    - name: Debug Cloudflare API token presence (name only, value masked)
-      debug:
-        msg: >-
-          Cloudflare API token name: {{ lookup('env','CLOUDFLARE_API_TOKEN_NAME') | default('unspecified') }}; token: {{ (lookup('env','CLOUDFLARE_API_TOKEN') | default('') ) | regex_replace('(.{4}).*(.{4})','\\1...\\2') if (lookup('env','CLOUDFLARE_API_TOKEN') | default('') | length) > 8 else ('***' if (lookup('env','CLOUDFLARE_API_TOKEN') | default('') | length) > 0 else 'not set') }}
-      no_log: false
+    - name: Write page rule dropdown JSON
+      copy:
+        content: "{{ page_rule_dropdown_list | to_json }}"
+        dest: "{{ playbook_dir }}/awx_dropdowns/page_rules.json"
+        mode: '0644'
 
-    - name: Show selected action and input
-      debug:
-        msg: "Action: {{ cf_action | default('undefined') }}, Domain: {{ domain | default('undefined') }}, Record: {{ record_name | default(selected_record_name | default('undefined')) }} ({{ record_type | default('undefined') }})"
-
-    - name: Create domain (zone) if requested
-      when: cf_action == 'create_domain'
+    - name: Optionally PATCH AWX job template survey questions with page rule choices
+      when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
       block:
-        - name: Create Cloudflare zone
+        - name: Get current AWX job template
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones"
-            method: POST
+            url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+            method: GET
             headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+              Authorization: "Bearer {{ awx_token }}"
               Content-Type: "application/json"
-            body_format: json
-            body:
-              name: "{{ domain }}"
-              jump_start: true
             return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: create_zone_result
-        - name: Output zone creation result
-          debug:
-            var: create_zone_result.json
+            validate_certs: "{{ awx_validate_certs | default(true) }}"
+          register: awx_job_template
 
-    - name: Standardize domain settings (always runs after create_domain or on demand)
-      when: cf_action in ['create_domain', 'standardize', 'sync']
-      block:
-        - name: Get zone ID for domain
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: zone_lookup
-        - name: Set zone_id fact
+        - name: Build updated survey_spec by replacing choices for selected_page_rule
           set_fact:
-            zone_id: >-
-              {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
-        - name: Apply standard zone settings
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
-            method: PATCH
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            body_format: json
-            body:
-              value: "{{ item.value }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
-          register: zone_settings_result
-        - name: Output zone settings result
-          debug:
-            var: zone_settings_result.results
+            awx_survey_spec: >-
+              {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+              {% set questions = spec.spec | default([]) %}
+              {% for q in questions %}
+                        {% if q.variable == 'selected_page_rule' %}
+                          {% set _ = q.update({'choices': (page_rule_dropdown_list | join(','))}) %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ spec }}
 
-    - name: Manage DNS record (create/update/delete)
-      when: cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
-      block:
-        - name: Get zone ID for domain
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: zone_lookup
-        - name: Set zone_id fact
-          set_fact:
-            zone_id: >-
-              {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
-        - name: List all DNS records for this domain (debug)
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: all_records_lookup
-
-        - name: Get page rules for this domain (if zone_id available)
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/pagerules"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: page_rules_lookup
-          when: zone_id is defined and zone_id | length > 0
-          ignore_errors: yes
-
-        - name: Normalize page rules lookup into simple facts
-          set_fact:
-            page_rules_count: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success %}{{ page_rules_lookup.json.result|length }}{% else %}0{% endif %}
-            page_rules_ids: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success %}{{ page_rules_lookup.json.result | map(attribute='id') | list | join(',') }}{% else %}''{% endif %}
-            page_rules_error_code: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].code }}{% else %}''{% endif %}
-            page_rules_error_msg: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].message }}{% else %}''{% endif %}
-          when: zone_id is defined and zone_id | length > 0
-
-        - name: Enforce free-plan page rules limit (keep max 3 rules per zone)
-          block:
-            - name: Set page rules limit and existing rules list
-              set_fact:
-                page_rules_limit: "{{ page_rules_limit | default(3) }}"
-                existing_page_rules: >-
-                  {{ page_rules_lookup.json.result if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success) else [] }}
-
-            - name: Compute excess count to delete
-              set_fact:
-                existing_count: "{{ existing_page_rules | length }}"
-                excess_to_delete: "{{ (existing_count - (page_rules_limit | int)) if (existing_count | int) > (page_rules_limit | int) else 0 }}"
-
-            - name: Debug page rules counts
-              debug:
-                msg: "PageRules: existing={{ existing_count }} limit={{ page_rules_limit }} excess_to_delete={{ excess_to_delete }}"
-
-            - name: Compute delete candidates (lowest priority) when excess exists
-              set_fact:
-                delete_candidates: >-
-                  {{ (existing_page_rules | sort(attribute='priority') | reverse | map(attribute='id') | list) if (excess_to_delete | int) > 0 else [] }}
-              when: excess_to_delete | int > 0
-
-            - name: Trim delete list to required count
-              set_fact:
-                delete_list: "{{ delete_candidates[0: (excess_to_delete | int) ] }}"
-              when: excess_to_delete | int > 0
-
-            - name: Delete excess page rules to enforce limit (only when not dry-run and apply enabled)
-              uri:
-                url: "{{ awx_api_url | default('https://api.cloudflare.com') | regex_replace('/$','') }}/client/v4/zones/{{ zone_id }}/pagerules/{{ item }}"
-                method: DELETE
-                headers:
-                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-                return_content: true
-                validate_certs: "{{ cf_validate_certs | default(true) }}"
-              loop: "{{ delete_list | default([]) }}"
-              loop_control:
-                label: "{{ item }}"
-              when: (excess_to_delete | int) > 0 and not (page_rules_dry_run | default(true)) and (apply_page_rules | default(true))
-              register: page_rules_delete_results
-
-            - name: Aggregate delete results into page_rules_apply_results
-              set_fact:
-                page_rules_apply_results: >-
-                  {{ (page_rules_apply_results | default([])) + [ { 'deleted_count': (page_rules_delete_results.results | default([]) | length) } ] }}
-              when: page_rules_delete_results is defined
-
-            - name: Recompute slots left to apply templates
-              set_fact:
-                page_rules_count: "{{ (existing_count - (delete_list | default([]) | length)) | int }}"
-                slots_left: "{{ (page_rules_limit | int) - (page_rules_count | int) if (page_rules_limit | int) - (page_rules_count | int) > 0 else 0 }}"
-          when: zone_id is defined and zone_id | length > 0
-
-        - name: Prepare templates to apply respecting free-plan limit
-          set_fact:
-            to_apply_templates: >-
-              {{ (page_rules_templates[0:slots_left] if (page_rules_templates is defined and slots_left | int > 0) else []) }}
-          when: page_rules_templates is defined
-        - name: Ensure record_id has a default (allow passing record_id directly)
-          set_fact:
-            record_id: "{{ record_id | default('') }}"
-        - name: Output all DNS records for this domain (debug)
-          # Show a concise list: name (type) -> content
-          debug:
-            msg: >-
-              {% set rows = [] %}
-              {% for r in (all_records_lookup.json.result if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined) else []) %}
-                {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
-              {% endfor %}
-              {{ rows }}
-          when: all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined
-
-        - name: No DNS records fetched (debug fallback)
-          debug:
-            msg: "No DNS records were fetched for domain {{ domain }} (no zone_id or API access)"
-          when: not (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined) and (debug_curl | default(false))
-
-        - name: Optionally show full DNS records JSON when debug_curl is true
-          debug:
-            var: all_records_lookup.json.result
-          when: debug_curl | default(false)
-
-        - name: Build simple domains and records lists for dropdowns
-          set_fact:
-            domains_list: >-
-              {{ (all_zones.json.result | map(attribute='name') | list) if (all_zones is defined and all_zones.json is defined and all_zones.json.result|length > 0) else [domain] }}
-            records_list_names: >-
-              {{ (all_records_lookup.json.result | map(attribute='name') | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
-            records_list_objects: >-
-              {{ (all_records_lookup.json.result | map(attribute=None) | map('combine', {}) | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
-
-        - name: Set default page rule templates (if not provided)
-          set_fact:
-            page_rules_templates: >-
-              {{ page_rules_templates | default([
-                {
-                  'id': 'pr_default_1',
-                  'name': 'Browser Cache 5m',
-                  'targets': [{'target':'url','constraint':{'operator':'matches','value':'*{{ domain }}/*'}}],
-                  'actions': [{'id':'browser_cache_ttl','value':300}],
-                  'priority': 1
-                },
-                {
-                  'id': 'pr_default_2',
-                  'name': 'Cache Everything',
-                  'targets': [{'target':'url','constraint':{'operator':'matches','value':'*{{ domain }}/*'}}],
-                  'actions': [{'id':'cache_level','value':'cache_everything'}],
-                  'priority': 2
-                },
-                {
-                  'id': 'pr_default_3',
-                  'name': 'Block known bots',
-                  'targets': [{'target':'url','constraint':{'operator':'matches','value':'*{{ domain }}/bots/*'}}],
-                  'actions': [{'id':'security_level','value':'high'}],
-                  'priority': 3
-                }
-              ]) }}
-
-        - name: Build page rules list for dropdowns (names)
-          set_fact:
-            page_rules_list: "{{ (page_rules_templates | map(attribute='name') | list) if page_rules_templates is defined else [] }}"
-
-        - name: Write dropdown files to project (domains and records) when enabled
-          block:
-            - name: Ensure dropdowns dir exists
-              file:
-                path: "{{ playbook_dir }}/awx_dropdowns"
-                state: directory
-                mode: '0755'
-
-            - name: Write domains list JSON
-              copy:
-                content: "{{ domains_list | to_json }}"
-                dest: "{{ playbook_dir }}/awx_dropdowns/domains.json"
-                mode: '0644'
-
-            - name: Write records list JSON for domain (names)
-              copy:
-                content: "{{ records_list_names | to_json }}"
-                dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.json"
-                mode: '0644'
-
-            - name: Write records objects JSON for domain (detailed)
-              copy:
-                content: "{{ records_list_objects | to_json }}"
-                dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.objects.json"
-                mode: '0644'
-
-            - name: Write page rules dropdown JSON (names)
-              copy:
-                content: "{{ page_rules_list | to_json }}"
-                dest: "{{ playbook_dir }}/awx_dropdowns/page_rules.json"
-                mode: '0644'
-
-            - name: Write page rules templates JSON (detailed)
-              copy:
-                content: "{{ page_rules_templates | to_json }}"
-                dest: "{{ playbook_dir }}/awx_dropdowns/page_rules_templates.json"
-                mode: '0644'
-
-            - name: Write AWX toggle dropdown for page_rules_dry_run
-              copy:
-                content: "[true,false]"
-                dest: "{{ playbook_dir }}/awx_dropdowns/page_rules_dry_run.json"
-                mode: '0644'
-
-            - name: Write AWX toggle dropdown for apply_page_rules
-              copy:
-                content: "[true,false]"
-                dest: "{{ playbook_dir }}/awx_dropdowns/apply_page_rules.json"
-                mode: '0644'
-
-            - name: Optionally commit & push dropdown files to repo
-              when: update_repo_dropdown_files | default(false)
-              block:
-                - name: git add dropdown files
-                  command: >-
-                    git add {{ playbook_dir }}/awx_dropdowns/domains.json {{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.json
-                  args:
-                    chdir: "{{ playbook_dir }}"
-                - name: git commit dropdown files
-                  command: >-
-                    git commit -m "chore: update awx dropdowns (domains/records)" || true
-                  args:
-                    chdir: "{{ playbook_dir }}"
-                - name: git push dropdown files
-                  command: >-
-                    git push || true
-                  args:
-                    chdir: "{{ playbook_dir }}"
-          when: update_awx_surveys | default(false)
-
-        - name: Optionally PATCH AWX job template survey questions with new choices
-          when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
-          block:
-            - name: Get current AWX job template
-              uri:
-                url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
-                method: GET
-                headers:
-                  Authorization: "Bearer {{ awx_token }}"
-                  Content-Type: "application/json"
-                return_content: true
-                validate_certs: "{{ awx_validate_certs | default(true) }}"
-              register: awx_job_template
-
-            - name: Build or extend survey_spec so required questions exist with choices/defaults
-              block:
-                - name: Load existing survey_spec into a native object
-                  set_fact:
-                    awx_existing_survey_spec: >-
-                      {{ awx_job_template.json.survey_spec if (awx_job_template is defined and awx_job_template.json is defined and awx_job_template.json.survey_spec is defined) else {'name':'Survey','spec':[]} }}
-
-                - name: Initialize spec_questions list
-                  set_fact:
-                    spec_questions: []
-
-                - name: Merge/update existing questions choices
-                  set_fact:
-                    spec_questions: >-
-                      {{ spec_questions + [ q | combine({ 'choices': (domains_list | join(',')) if q.variable == 'selected_domain' else (records_list | join(',')) if q.variable == 'selected_record_name' else (page_rules_list | join(',')) if q.variable == 'selected_page_rule' else ('true,false') if q.variable in ['page_rules_dry_run','apply_page_rules'] else (q.choices | default('')) }) ] }}
-                  loop: "{{ awx_existing_survey_spec.spec | default([]) }}"
-                  loop_control:
-                    loop_var: q
-
-                - name: Compute existing question variables
-                  set_fact:
-                    existing_qvars: "{{ spec_questions | map(attribute='variable') | list }}"
-
-                - name: Append missing selected_page_rule question
-                  set_fact:
-                    spec_questions: "{{ spec_questions + [ { 'question_name':'Page Rule Template','question_description':'Choose a page rule template to apply (or leave empty to auto-apply)','required': False, 'variable':'selected_page_rule', 'choices': (page_rules_list | join(',')) } ] }}"
-                  when: "'selected_page_rule' not in existing_qvars"
-
-                - name: Append missing page_rules_dry_run question
-                  set_fact:
-                    spec_questions: "{{ spec_questions + [ { 'question_name':'Page Rules Dry Run','question_description':'Preview page rules without applying (true/false)','required': False, 'variable':'page_rules_dry_run', 'choices': 'true,false', 'default': ('true' if (page_rules_dry_run | default(true) | bool) else 'false') } ] }}"
-                  when: "'page_rules_dry_run' not in existing_qvars"
-
-                - name: Append missing apply_page_rules question
-                  set_fact:
-                    spec_questions: "{{ spec_questions + [ { 'question_name':'Apply Page Rules','question_description':'Actually apply page rules when none selected (true/false)','required': False, 'variable':'apply_page_rules', 'choices': 'true,false', 'default': ('true' if (apply_page_rules | default(true) | bool) else 'false') } ] }}"
-                  when: "'apply_page_rules' not in existing_qvars"
-
-                - name: Build final awx_survey_spec object (native dict/list)
-                  set_fact:
-                    awx_survey_spec:
-                      name: "{{ awx_existing_survey_spec.name | default('Survey') }}"
-                      spec: "{{ spec_questions }}"
-
-                - name: Show AWX PATCH payload (dry-run)
-                  debug:
-                    msg:
+                - name: Patch AWX job template with updated survey_spec (page rules)
+                  uri:
+                    url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+                    method: PATCH
+                    headers:
+                      Authorization: "Bearer {{ awx_token }}"
+                      Content-Type: "application/json"
+                    body_format: json
+                    body:
                       survey_enabled: true
                       survey_spec: "{{ awx_survey_spec }}"
-                  when: awx_patch_dry_run | default(true)
-
-            - name: Patch AWX job template with updated survey_spec
-              uri:
-                url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
-                method: PATCH
-                headers:
-                  Authorization: "Bearer {{ awx_token }}"
-                  Content-Type: "application/json"
-                body_format: json
-                body:
-                  survey_enabled: true
-                  survey_spec: "{{ awx_survey_spec }}"
-                return_content: true
-                validate_certs: "{{ awx_validate_certs | default(true) }}"
-              register: awx_patch_result
-              when: not (awx_patch_dry_run | default(true))
-          rescue:
-            - name: Warn AWX survey update failed
-              debug:
-                msg: "AWX survey update failed or was not possible; check AWX API settings or token"
-        - name: Apply page rule templates when none selected (safe mode)
-          when: cf_action in ['create_record','update_record'] and (selected_page_rule | default('')) == ''
-          block:
-            - name: Initialize page rules apply defaults (auto-apply by default)
-              set_fact:
-                page_rules_dry_run: "{{ page_rules_dry_run | default(false) }}"
-                apply_page_rules: "{{ apply_page_rules | default(true) }}"
-
-            - name: Log page rules that would be applied (dry-run flag shown)
-              debug:
-                msg: >-
-                  PAGE_RULES_TO_APPLY | Domain={{ domain }} | Templates={{ page_rules_list | join(';') }} | ApplyFlag={{ apply_page_rules }} | DryRun={{ page_rules_dry_run }}
-
-            - name: Auto-apply page rule templates when dry-run disabled or apply_page_rules enabled
-              block:
-                - name: Ensure we have templates to apply
-                  assert:
-                    that:
-                      - page_rules_templates is defined
-                      - page_rules_templates | length > 0
-
-                - name: Iterate templates to apply and POST each to Cloudflare (or dry-run)
-                  include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
-                  loop: "{{ to_apply_templates | default(page_rules_templates) }}"
-                  when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
-
+                    return_content: true
+                    validate_certs: "{{ awx_validate_certs | default(true) }}"
+                  register: awx_patch_result
               rescue:
-                - name: Warn that page_rules application step failed
-                  debug:
-                    msg: >-
-                      PAGE_RULES_APPLY_ERROR | Domain={{ domain }} | Error=Failed to iterate or POST page rules; check templates and token scopes
 
-            - name: Debug page rules apply results
-              debug:
-                var: page_rules_apply_results
-              when: page_rules_apply_results is defined
-        - name: Set effective record name (from dropdown or input)
-          set_fact:
-            effective_record_name: >-
-              {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
-
-        - name: Trim and normalize effective_record_name (strip quotes, collapse spaces)
-          set_fact:
-            effective_record_name: >-
-              {{ effective_record_name | default('') | trim
-                 | replace('\"','')
-                 | replace("'", '')
-                 | regex_replace('\\s+',' ') }}
-
-        - name: Build fully-qualified record name (append domain if needed)
-          set_fact:
-            fq_record_name: >-
-              {% if effective_record_name is defined and effective_record_name | length > 0 %}
-                {% if effective_record_name | regex_search('\.' ~ domain ~ '$') %}
-                  {{ effective_record_name | trim }}
-                {% elif effective_record_name == '@' %}
-                  {{ domain }}
-                {% else %}
-                  {{ (effective_record_name | trim) ~ '.' ~ domain }}
-                {% endif %}
-              {% else %}
-                ''
-              {% endif %}
-
-        - name: Critical info summary (concise)
+        - name: Warn AWX survey update failed (page rules)
           debug:
-            msg: >
-              ACTION: {{ cf_action | default('undefined') }} | DOMAIN: {{ domain | default('undefined') }} | FQDN: {{ fq_record_name | default('') | trim }} | TYPE: {{ record_type | default('') }} | EFFECTIVE_NAME: {{ effective_record_name | default('') }} | RESOLVED_RECORD_ID: {{ record_id | default('not-resolved') }} | RECORD_ID_SOURCE: {% if record_id is defined and record_id != '' and (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result | length > 0 and record_lookup.json.result[0].id == record_id) %}api-lookup{% elif record_id is defined and record_id != '' %}provided-or-local-scan{% else %}none{% endif %} | TTL: {{ numeric_ttl | default('3600') }} | PROXIED: {{ global_proxied | default(false) }} | PAYLOAD_FILE: /tmp/record_payload_{{ inventory_hostname }}.json | RECORDS_SUMMARY: {{ (all_records_lookup.json.result | map(attribute='name') | list)[:10] if (all_records_lookup is defined and all_records_lookup.json is defined) else [] }}
-          when: cf_action in ['create_record','update_record','delete_record','clone_record']
+            msg: "AWX survey update for page rules failed or was not possible; check AWX API settings or token"
 
-        - name: Clone record (if requested)
-          when: cf_action == 'clone_record'
+    - name: Check Cloudflare token type for page rules
+      fail:
+        msg: "Cloudflare API token is account-level. Page Rules endpoint requires a zone-level token. Please create a token with zone:read and zone:edit permissions."
+      when: page_rules_error_code == '1011'
+
+    - name: Set existing_count fact for page rules
+      set_fact:
+        existing_count: "{{ page_rules_count | default(0) }}"
+        page_rules_error_code: "{{ page_rules_lookup.json.errors[0].code if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 else '' }}"
+        page_rules_error_msg: "{{ page_rules_lookup.json.errors[0].message if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 else '' }}"
+      when: zone_id is defined and zone_id | length > 0
+
+    - name: Ensure record_id has a default (allow passing record_id directly)
+      set_fact:
+        record_id: "{{ record_id | default('') }}"
+
+    - name: Output all DNS records for this domain (debug)
+      # Show a concise list: name (type) -> content
+      debug:
+        msg: >-
+          {% set rows = [] %}
+          {% for r in all_records_lookup.json.result %}
+            {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
+          {% endfor %}
+
+    - name: Optionally show full DNS records JSON when debug_curl is true
+      debug:
+        var: all_records_lookup.json.result
+      when: debug_curl | default(false)
+
+
+    - name: Build simple domains and records lists for dropdowns
+      set_fact:
+        domains_list: >-
+          {{ (all_zones.json.result | map(attribute='name') | list) if (all_zones is defined and all_zones.json is defined and all_zones.json.result|length > 0) else [domain] }}
+        records_list_names: >-
+          {{ (all_records_lookup.json.result | map(attribute='name') | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
+        records_list_objects: >-
+          {{ (all_records_lookup.json.result | map(attribute=None) | map('combine', {}) | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
+
+
+    - name: Write dropdown files to project (domains and records) when enabled
+      block:
+        - name: Ensure dropdowns dir exists
+          file:
+            path: "{{ playbook_dir }}/awx_dropdowns"
+            state: directory
+            mode: '0755'
+
+        - name: Write domains list JSON
+          copy:
+            content: "{{ domains_list | to_json }}"
+            dest: "{{ playbook_dir }}/awx_dropdowns/domains.json"
+            mode: '0644'
+
+        - name: Write records list JSON for domain (names)
+          copy:
+            content: "{{ records_list_names | to_json }}"
+            dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.json"
+            mode: '0644'
+
+        - name: Write records objects JSON for domain (detailed)
+          copy:
+            content: "{{ records_list_objects | to_json }}"
+            dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.objects.json"
+            mode: '0644'
+
+        - name: Optionally commit & push dropdown files to repo
+          when: update_repo_dropdown_files | default(false)
           block:
-            - name: Get source record details
-              uri:
-                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ effective_record_name }}"
-                method: GET
-                headers:
-                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-                return_content: true
-                validate_certs: "{{ cf_validate_certs | default(true) }}"
-              register: source_record_lookup
+            - name: git add dropdown files
+              command: >-
+                git add {{ playbook_dir }}/awx_dropdowns/domains.json {{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.json
+              args:
+                chdir: "{{ playbook_dir }}"
+            - name: git commit dropdown files
+              command: >-
+                git commit -m "chore: update awx dropdowns (domains/records)" || true
+              args:
+                chdir: "{{ playbook_dir }}"
+            - name: git push dropdown files
+              command: >-
+                git push || true
+              args:
+                chdir: "{{ playbook_dir }}"
+      when: update_awx_surveys | default(false)
 
-            - name: Set source_record fact
-              set_fact:
-                source_record: "{{ source_record_lookup.json.result[0] if source_record_lookup.json.result|length > 0 else {} }}"
+
+    - name: Optionally PATCH AWX job template survey questions with new choices
+      when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
+      block:
+        - name: Get current AWX job template
+          uri:
+            url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ awx_token }}"
+              Content-Type: "application/json"
+            return_content: true
+            validate_certs: "{{ awx_validate_certs | default(true) }}"
+          register: awx_job_template
+
+        - name: Build updated survey_spec by replacing choices for selected_domain/selected_record_name
+          set_fact:
+            awx_survey_spec: >-
+              {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+              {% set questions = spec.spec | default([]) %}
+              {% for q in questions %}
+                {% if q.variable == 'selected_domain' %}
+                  {% set _ = q.update({'choices': (domains_list | join(','))}) %}
+                {% elif q.variable == 'selected_record_name' %}
+                  {% set _ = q.update({'choices': (records_list | join(','))}) %}
+                {% endif %}
+              {% endfor %}
+              {{ spec }}
+
+        - name: Patch AWX job template with updated survey_spec
+          uri:
+            url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+            method: PATCH
+            headers:
+              Authorization: "Bearer {{ awx_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              survey_enabled: true
+              survey_spec: "{{ awx_survey_spec }}"
+            return_content: true
+            validate_certs: "{{ awx_validate_certs | default(true) }}"
+          register: awx_patch_result
+      rescue:
+        - name: Warn AWX survey update failed
+          debug:
+            msg: "AWX survey update failed or was not possible; check AWX API settings or token"
+
+    - name: Set effective record name (from dropdown or input)
+      set_fact:
+        effective_record_name: >-
+          {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
 
 
-            - name: Ensure clone payload template exists in project
-              stat:
-                path: "{{ playbook_dir }}/templates/clone_payload.json.j2"
-              register: clone_payload_template_stat
+    - name: Trim and normalize effective_record_name (strip quotes, collapse spaces)
+      set_fact:
+        effective_record_name: >-
+          {{ effective_record_name | default('') | trim
+             | replace('"','')
+             | replace("'", '')
+             | regex_replace('\\s+',' ') }}
 
-            - name: Build fallback clone payload JSON from source_record/vars (if template missing)
-              set_fact:
-                clone_payload_json: >-
-                  {{ ({'type': record_type,
-                       'name': (clone_record_name | default(effective_record_name)),
-                       'content': (record_value | default(source_record.content | default(''))),
-                       'ttl': (source_record.ttl | default(numeric_ttl|int if numeric_ttl is defined else 3600)) }
-                     ) | combine({'proxied': (source_record.proxied | default(effective_proxied | default(false))) } if record_type in ['A','AAAA','CNAME'] else {})
-                     | to_json }}
-              when: not clone_payload_template_stat.stat.exists
 
-            - name: Write fallback clone payload to /tmp (if built)
-              copy:
-                content: "{{ clone_payload_json }}"
-                dest: "/tmp/clone_payload_{{ inventory_hostname }}.json"
-                mode: '0644'
-              when: not clone_payload_template_stat.stat.exists
+    - name: Build fully-qualified record name (append domain if needed)
+      set_fact:
+        fq_record_name: >-
+          {% if effective_record_name is defined and effective_record_name | length > 0 %}
+            {% if effective_record_name | regex_search('\.' ~ domain ~ '$') %}
+              ---
+              - hosts: localhost
+                connection: local
+                gather_facts: false
+                vars_files:
+                  - vars/page_rules_map.yml
+                tasks:
+                  - name: Build page rule dropdown JSON (friendly names)
+                    set_fact:
+                      page_rule_dropdown_list: >-
+                        {{ page_rules_map.keys() | list if page_rules_map is defined else [] }}
 
-            - name: Render clone payload template to /tmp
-              template:
-                src: clone_payload.json.j2
-                dest: "/tmp/clone_payload_{{ inventory_hostname }}.json"
-                mode: '0644'
-              when: clone_payload_template_stat.stat.exists
+                  - name: Write page rule dropdown JSON
+                    copy:
+                      content: "{{ page_rule_dropdown_list | to_json }}"
+                      dest: "{{ playbook_dir }}/awx_dropdowns/page_rules.json"
+                      mode: '0644'
 
-            - name: Create cloned record (send rendered JSON) using uri
-              uri:
-                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
-                method: POST
-                headers:
-                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-                  Content-Type: "application/json"
-                # send raw JSON payload from rendered file
-                body_format: raw
-                body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') }}"
-                return_content: true
-                validate_certs: "{{ cf_validate_certs | default(true) }}"
-              when: not (cf_force_curl | default(false) | bool)
-              register: clone_result
+                  - name: Optionally PATCH AWX job template survey questions with page rule choices
+                    when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
+                    block:
+                      - name: Get current AWX job template
+                        uri:
+                          url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+                          method: GET
+                          headers:
+                            Authorization: "Bearer {{ awx_token }}"
+                            Content-Type: "application/json"
+                          return_content: true
+                          validate_certs: "{{ awx_validate_certs | default(true) }}"
+                        register: awx_job_template
 
-            - name: Create cloned record (send rendered JSON) using curl
-              shell: >-
-                curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X POST "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records" \
-                  -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
-                  -H "Content-Type: application/json" \
-                  --data-binary @/tmp/clone_payload_{{ inventory_hostname }}.json
+                      - name: Build updated survey_spec by replacing choices for selected_page_rule
+                        set_fact:
+                          awx_survey_spec: >-
+                            {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+                            {% set questions = spec.spec | default([]) %}
+                            {% for q in questions %}
+                              {% if q.variable == 'selected_page_rule' %}
+                                {% set _ = q.update({'choices': (page_rule_dropdown_list | join(','))}) %}
+                              {% endif %}
+                            {% endfor %}
+                            {{ spec }}
+
+                      - name: Patch AWX job template with updated survey_spec (page rules)
+                        uri:
+                          url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+                          method: PATCH
+                          headers:
+                            Authorization: "Bearer {{ awx_token }}"
+                            Content-Type: "application/json"
+                          body_format: json
+                          body:
+                            survey_enabled: true
+                            survey_spec: "{{ awx_survey_spec }}"
+                          return_content: true
+                          validate_certs: "{{ awx_validate_certs | default(true) }}"
+                        register: awx_patch_result
+                    rescue:
+                      - name: Warn AWX survey update failed (page rules)
+                        debug:
+                          msg: "AWX survey update for page rules failed or was not possible; check AWX API settings or token"
+
+                  - name: Check Cloudflare token type for page rules
+                    fail:
+                      msg: "Cloudflare API token is account-level. Page Rules endpoint requires a zone-level token. Please create a token with zone:read and zone:edit permissions."
+                    when: page_rules_error_code == '1011'
+
+                  - name: Set existing_count fact for page rules
+                    set_fact:
+                      existing_count: "{{ page_rules_count | default(0) }}"
+                      page_rules_error_code: "{{ page_rules_lookup.json.errors[0].code if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 else '' }}"
+                      page_rules_error_msg: "{{ page_rules_lookup.json.errors[0].message if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 else '' }}"
+                    when: zone_id is defined and zone_id | length > 0
+
+                  - name: Ensure record_id has a default (allow passing record_id directly)
+                    set_fact:
+                      record_id: "{{ record_id | default('') }}"
+
+                  - name: Output all DNS records for this domain (debug)
+                    # Show a concise list: name (type) -> content
+                    debug:
+                      msg: >-
+                        {% set rows = [] %}
+                        {% for r in all_records_lookup.json.result %}
+                          {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
+                        {% endfor %}
               args:
                 executable: /bin/bash
               when: cf_force_curl | default(false) | bool
@@ -581,279 +355,288 @@
               debug:
                 var: clone_result.json
 
-        - name: Find existing record (if any)
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name | urlencode }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: record_lookup
-          when: (record_id is not defined or record_id == '') and record_type is defined and fq_record_name is defined and fq_record_name | length > 0
-        - name: Set record_id from API lookup if available
-          set_fact:
-            record_id: "{{ record_lookup.json.result[0].id }}"
-          when: record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0
 
-        - name: Build desired_record_name for local scan (lower-trim)
-          set_fact:
-            desired_record_name: "{{ (fq_record_name | trim | lower) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim | lower) }}"
+    - name: Find existing record (if any)
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+        return_content: true
+        validate_certs: "{{ cf_validate_certs | default(true) }}"
+      register: record_lookup
+      when: (record_id is not defined or record_id == '') and record_type is defined and fq_record_name is defined and fq_record_name | length > 0
 
-        - name: Find record_id by scanning all_records_lookup if API lookup missed
-          set_fact:
-            record_id: "{{ item.id }}"
-          loop: "{{ all_records_lookup.json.result | default([]) }}"
-          when:
-            - record_id is not defined or record_id == ''
-            - item.name is defined
-            - (item.name | trim | lower) == desired_record_name
-            - item.type == record_type
-        - name: Set numeric TTL for record
-          set_fact:
-            numeric_ttl: >-
-              {% if global_ttl is defined and (global_ttl is number or (global_ttl is string and global_ttl|int > 0)) %}{{ global_ttl|int }}{% else %}3600{% endif %}
 
-        - name: Debug numeric TTL value
-          debug:
-            msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
+    - name: Set record_id from API lookup if available
+      set_fact:
+        record_id: "{{ record_lookup.json.result[0].id }}"
+      when: record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0
 
-        - name: Determine effective proxied flag (record-level overrides)
-          set_fact:
-            effective_proxied: >-
-              {% if record_proxied is defined %}{{ record_proxied | bool }}{% elif proxied is defined %}{{ proxied | bool }}{% else %}{{ global_proxied | default(false) | bool }}{% endif %}
 
-        - name: Ensure record payload template exists in project
-          stat:
-            path: "{{ playbook_dir }}/templates/record_payload.json.j2"
-          register: record_payload_template_stat
 
-        - name: Build fallback record payload JSON from variables (if template missing)
-          set_fact:
-            record_payload_json: >-
-              {{ ({ 'type': record_type,
-                    'name': ((fq_record_name if (fq_record_name is defined and fq_record_name|length > 0) else effective_record_name) | trim),
-                    'content': (( '"' ~ (record_value|default('') | replace('"','') | trim) ~ '"') if record_type == 'TXT' else (record_value|default(''))),
-                    'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) }
-                 )
-                 | combine({'proxied': (effective_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
-                 | to_json }}
-          when: not record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
+    - name: Build desired_record_name for local scan (lower-trim)
+      set_fact:
+        desired_record_name: "{{ (fq_record_name | trim | lower) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim | lower) }}"
 
-        - name: Write fallback record payload to /tmp (if built)
-          copy:
-            content: "{{ record_payload_json }}"
-            dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
-            mode: '0644'
-          when: not record_payload_template_stat.stat.exists and cf_action in ['create_record','update_record','clone_record']
 
-        - name: Ensure effective name used by template is trimmed (payload render)
-          set_fact:
-            effective_record_name: "{{ (fq_record_name | trim) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim) }}"
-          when: cf_action in ['create_record','update_record','clone_record']
 
-        - name: Render record payload template to /tmp
-          template:
-            src: record_payload.json.j2
-            dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
-            mode: '0644'
-          when: record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
+    - name: Find record_id by scanning all_records_lookup if API lookup missed
+      set_fact:
+        record_id: "{{ item.id }}"
+      loop: "{{ all_records_lookup.json.result | default([]) }}"
+      when:
+        - record_id is not defined or record_id == ''
+        - item.name is defined
+        - (item.name | trim | lower) == desired_record_name
+        - item.type == record_type
 
-        - name: Debug runtime cf_validate_certs value
-          debug:
-            msg: "cf_validate_certs={{ cf_validate_certs | default('undefined') }} (string)"
 
-        - name: Preview rendered record payload (first 200 chars)
-          shell: >-
-            if [ -f /tmp/record_payload_{{ inventory_hostname }}.json ]; then
-              head -c 200 /tmp/record_payload_{{ inventory_hostname }}.json | sed -n '1,200p'
-            else
-              echo 'NO FILE'
-            fi
-          register: record_payload_preview
-          changed_when: false
+
+    - name: Set numeric TTL for record
+      set_fact:
+        numeric_ttl: >-
+          {% if global_ttl is defined and (global_ttl is number or (global_ttl is string and global_ttl|int > 0)) %}{{ global_ttl|int }}{% else %}3600{% endif %}
+
+
+
+    - name: Debug numeric TTL value
+      debug:
+        msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
+
+
+
+    - name: Determine effective proxied flag (record-level overrides)
+      set_fact:
+        effective_proxied: >-
+          {% if record_proxied is defined %}{{ record_proxied | bool }}{% elif proxied is defined %}{{ proxied | bool }}{% else %}{{ global_proxied | default(false) | bool }}{% endif %}
+
+
+
+    - name: Ensure record payload template exists in project
+      stat:
+        path: "{{ playbook_dir }}/templates/record_payload.json.j2"
+      register: record_payload_template_stat
+
+
+
+    - name: Build fallback record payload JSON from variables (if template missing)
+      set_fact:
+        record_payload_json: >-
+          {{ ({ 'type': record_type,
+                'name': ((fq_record_name if (fq_record_name is defined and fq_record_name|length > 0) else effective_record_name) | trim),
+                'content': (( '"' ~ (record_value|default('') | replace('"','') | trim) ~ '"') if record_type == 'TXT' else (record_value|default(''))),
+                'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) }
+             )
+             | combine({'proxied': (effective_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
+             | to_json }}
+      when: not record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
+
+
+
+    - name: Write fallback record payload to /tmp (if built)
+      copy:
+        content: "{{ record_payload_json }}"
+        dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: not record_payload_template_stat.stat.exists and cf_action in ['create_record','update_record','clone_record']
+
+
+
+    - name: Ensure effective name used by template is trimmed (payload render)
+      set_fact:
+        effective_record_name: "{{ (fq_record_name | trim) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim) }}"
+      when: cf_action in ['create_record','update_record','clone_record']
+
+
+
+    - name: Render record payload template to /tmp
+      template:
+        src: record_payload.json.j2
+        dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
+        mode: '0644'
+      when: record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
+
+
+
+    - name: Debug runtime cf_validate_certs value
+      debug:
+        msg: "cf_validate_certs={{ cf_validate_certs | default('undefined') }} (string)"
+
+
+
+    - name: Preview rendered record payload (first 200 chars)
+      shell: >-
+        if [ -f /tmp/record_payload_{{ inventory_hostname }}.json ]; then
+          head -c 200 /tmp/record_payload_{{ inventory_hostname }}.json | sed -n '1,200p'
+        else
+          echo 'NO FILE'
+        fi
+      register: record_payload_preview
+      changed_when: false
+      ignore_errors: true
+
+
+
+    - name: Show rendered record payload preview
+      debug:
+        var: record_payload_preview.stdout
+      when: cf_action in ['create_record','update_record','clone_record']
+
+
+
+    - name: Create or update record (send rendered JSON) — attempt uri first (may fail)
+      # tolerate failures here so we can fallback to curl and capture Cloudflare's raw response
+      uri:
+        url: >-
+          https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}
+        method: "{{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }}"
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+          Content-Type: "application/json"
+        # validate JSON payload before sending
+        body_format: raw
+        body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
+        return_content: true
+        validate_certs: true
+      when: cf_action in ['create_record','update_record'] and (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
+      register: record_result
+      ignore_errors: yes
+
+
+
+    - name: Validate CNAME target is not an IP address
+      fail:
+        msg: "CNAME record value looks like an IP ({{ record_value }}). CNAME must point to a hostname or FQDN. Use A/AAAA for IP addresses."
+      when: record_type == 'CNAME' and (record_value is defined and record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$'))
+
+
+
+    - name: Fallback to curl if uri call failed
+      shell: >-
+        curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}" \
+          -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
+          -H "Content-Type: application/json" \
+          --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
+      args:
+        executable: /bin/bash
+      when: cf_action in ['create_record','update_record'] and ((record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1))
+      register: record_curl_result
+
+
+
+    - name: Normalize record_result when fallback curl used
+      set_fact:
+        record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
+      when: record_curl_result is defined and record_curl_result.stdout is defined
+
+
+
+    - name: Debug Cloudflare response when record result unknown or on debug
+      debug:
+        msg: >-
+          CF_RESPONSE_JSON={{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout if (record_curl_result is defined and record_curl_result.stdout is defined) else 'none') }}
+      when: (record_result is defined and (record_result.json is not defined or record_result.json.success is not defined or record_result.json.success == false)) or (debug_curl | default(false))
+
+
+
+    - name: Create or update record (send rendered JSON) — without cert validation (uri)
+      uri:
+        url: >-
+          https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}
+        method: "{{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }}"
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+          Content-Type: "application/json"
+        # validate JSON payload before sending
+        body_format: raw
+        body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
+        return_content: true
+        validate_certs: false
+
+      when: cf_action in ['create_record','update_record'] and not (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
+      register: record_result
+
+
+
+    - name: Create or update record (send rendered JSON) using curl
+      shell: >-
+        curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}" \
+          -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
+          -H "Content-Type: application/json" \
+          --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
+      args:
+        executable: /bin/bash
+      when: cf_action in ['create_record','update_record'] and (cf_force_curl | default(false) | bool)
+      register: record_curl_result
+
+
+
+    - name: Normalize record_result when using curl
+      set_fact:
+        record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
+      when: cf_force_curl | default(false) | bool
+
+
+
+    - name: Validate record JSON payload (python)
+      when: cf_action in ['create_record','update_record','clone_record']
+      block:
+        - name: Try to parse record payload
+          command: >-
+            {{ ansible_playbook_python | default('python3') }} -c "import json,sys; json.load(open('/tmp/record_payload_{{ inventory_hostname }}.json'))"
+          register: record_json_check
           ignore_errors: true
-        - name: Show rendered record payload preview
-          debug:
-            var: record_payload_preview.stdout
-          when: cf_action in ['create_record','update_record','clone_record']
-
-        - name: Create or update record (send rendered JSON) — attempt uri first (may fail)
-          # tolerate failures here so we can fallback to curl and capture Cloudflare's raw response
-          uri:
-            url: >-
-              https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}
-            method: "{{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }}"
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            # validate JSON payload before sending
-            body_format: raw
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
-            return_content: true
-            validate_certs: true
-          when: cf_action in ['create_record','update_record'] and (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
-          register: record_result
-          ignore_errors: yes
-
-        - name: Validate CNAME target is not an IP address
+        - name: Show record payload on parse failure
+          when: record_json_check.rc != 0
+          shell: cat /tmp/record_payload_{{ inventory_hostname }}.json
+          register: record_payload_dump
+        - name: Fail with record payload content (invalid JSON)
+          when: record_json_check.rc != 0
           fail:
-            msg: "CNAME record value looks like an IP ({{ record_value }}). CNAME must point to a hostname or FQDN. Use A/AAAA for IP addresses."
-          when: record_type == 'CNAME' and (record_value is defined and record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$'))
+            msg: "Record payload JSON is invalid: {{ record_payload_dump.stdout }}"
 
-        - name: Fallback to curl if uri call failed
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}" \
-              -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
-              -H "Content-Type: application/json" \
-              --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
-          args:
-            executable: /bin/bash
-          when: cf_action in ['create_record','update_record'] and ((record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1))
-          register: record_curl_result
 
-        - name: Normalize record_result when fallback curl used
-          set_fact:
-            record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
-          when: record_curl_result is defined and record_curl_result.stdout is defined
 
-        - name: Debug Cloudflare response when record result unknown or on debug
-          debug:
-            msg: >-
-              CF_RESPONSE_JSON={{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout if (record_curl_result is defined and record_curl_result.stdout is defined) else 'none') }}
-          when: (record_result is defined and (record_result.json is not defined or record_result.json.success is not defined or record_result.json.success == false)) or (debug_curl | default(false))
+    - name: Optional curl POST for record payload (debug)
+      when: debug_curl | default(false)
+      shell: >-
+        curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}" \
+          -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
+          -H "Content-Type: application/json" \
+          --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
+      args:
+        executable: /bin/bash
+      register: record_curl_result
 
-        - name: Build normalized CF record response object for idempotency checks
-          set_fact:
-            cf_record_response: >-
-              {{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout | default('') | from_json if (record_curl_result is defined and record_curl_result.stdout is defined and record_curl_result.stdout|length > 0) else {}) }}
-          when: cf_action == 'create_record'
 
-        - name: Detect duplicate-record error (Cloudflare 81058)
-          set_fact:
-            cf_duplicate_error: >-
-              {{ (cf_record_response.errors is defined and (81058 in (cf_record_response.errors | map(attribute='code') | list))) if (cf_record_response is defined) else false }}
-          when: cf_action == 'create_record'
 
-        - name: Lookup existing record ID when duplicate detected
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name | urlencode }}"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: duplicate_lookup
-          when: cf_action == 'create_record' and cf_duplicate_error | default(false)
-          failed_when: false
-
-        - name: Set record_id from duplicate lookup (create->update conversion)
-          set_fact:
-            record_id: >-
-              {{ (duplicate_lookup.json.result[0].id) if (duplicate_lookup is defined and duplicate_lookup.json is defined and duplicate_lookup.json.result is defined and duplicate_lookup.json.result|length > 0) else record_id | default('') }}
-          when: cf_action == 'create_record' and cf_duplicate_error | default(false)
-
-        - name: Attempt update when duplicate found (create->update idempotency)
-          uri:
-            url: >-
-              https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}
-            method: PUT
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            body_format: raw
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          when: cf_action == 'create_record' and cf_duplicate_error | default(false) and record_id is defined and record_id | length > 0
-          register: record_result_update
-          failed_when: false
-
-        - name: Merge update result into record_result when update attempted
-          set_fact:
-            record_result: "{{ record_result_update }}"
-          when: cf_action == 'create_record' and cf_duplicate_error | default(false) and record_result_update is defined
-
-        - name: Create or update record (send rendered JSON) — without cert validation (uri)
-          uri:
-            url: >-
-              https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}
-            method: "{{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }}"
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            # validate JSON payload before sending
-            body_format: raw
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
-            return_content: true
-            validate_certs: false
-          when: cf_action in ['create_record','update_record'] and not (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
-          register: record_result
-
-        - name: Create or update record (send rendered JSON) using curl
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}" \
-              -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
-              -H "Content-Type: application/json" \
-              --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
-          args:
-            executable: /bin/bash
-          when: cf_action in ['create_record','update_record'] and (cf_force_curl | default(false) | bool)
-          register: record_curl_result
-
-        - name: Normalize record_result when using curl
-          set_fact:
-            record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
-          when: cf_force_curl | default(false) | bool
-
-        - name: Validate record JSON payload (python)
-          when: cf_action in ['create_record','update_record','clone_record']
-          block:
-            - name: Try to parse record payload
-              command: >-
-                {{ ansible_playbook_python | default('python3') }} -c "import json,sys; json.load(open('/tmp/record_payload_{{ inventory_hostname }}.json'))"
-              register: record_json_check
-              ignore_errors: true
-            - name: Show record payload on parse failure
-              when: record_json_check.rc != 0
-              shell: cat /tmp/record_payload_{{ inventory_hostname }}.json
-              register: record_payload_dump
-            - name: Fail with record payload content (invalid JSON)
-              when: record_json_check.rc != 0
-              fail:
-                msg: "Record payload JSON is invalid: {{ record_payload_dump.stdout }}"
-
-        - name: Optional curl POST for record payload (debug)
-          when: debug_curl | default(false)
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}" \
-              -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
-              -H "Content-Type: application/json" \
-              --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
-          args:
-            executable: /bin/bash
-          register: record_curl_result
-        - name: Debug record curl result
-          when: debug_curl | default(false)
-          debug:
-            var: record_curl_result.stdout
+    - name: Debug record curl result
+      when: debug_curl | default(false)
+      debug:
+        var: record_curl_result.stdout
 
         # debug payload task removed to avoid YAML parsing issues
-        
-        - name: Delete record
-          when: cf_action == 'delete_record' and record_id
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
-            method: DELETE
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: delete_result
-        - name: Output record operation result (single-line)
-          debug:
-            msg: >-
-              {% if cf_action in ['create_record','update_record'] %}RECORD | Action={{ cf_action }} | Success={{ (record_result.json.success if (record_result is defined and record_result.json is defined and record_result.json.success is defined) else 'unknown') }} | ID={{ (record_result.json.result.id if (record_result is defined and record_result.json is defined and record_result.json.result is defined and record_result.json.result.id is defined) else 'N/A') }} | Errors={{ (record_result.json.errors if (record_result is defined and record_result.json is defined and record_result.json.errors is defined) else []) }}{% elif cf_action == 'delete_record' %}RECORD | Action=delete | Success={{ (delete_result.json.success if (delete_result is defined and delete_result.json is defined and delete_result.json.success is defined) else 'unknown') }} | ID={{ (delete_result.json.result.id if (delete_result is defined and delete_result.json is defined and delete_result.json.result is defined and delete_result.json.result.id is defined) else record_id | default('N/A')) }} | Errors={{ (delete_result.json.errors if (delete_result is defined and delete_result.json is defined and delete_result.json.errors is defined) else []) }}{% else %}RECORD | No action performed{% endif %}
+
+
+
+    - name: Delete record
+      when: cf_action == 'delete_record' and record_id
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+        return_content: true
+        validate_certs: "{{ cf_validate_certs | default(true) }}"
+      register: delete_result
+
+
+
+    - name: Output record operation result (single-line)
+      debug:
+        msg: >-
+          {% if cf_action in ['create_record','update_record'] %}RECORD | Action={{ cf_action }} | Success={{ (record_result.json.success if (record_result is defined and record_result.json is defined and record_result.json.success is defined) else 'unknown') }} | ID={{ (record_result.json.result.id if (record_result is defined and record_result.json is defined and record_result.json.result is defined and record_result.json.result.id is defined) else 'N/A') }} | Errors={{ (record_result.json.errors if (record_result is defined and record_result.json is defined and record_result.json.errors is defined) else []) }}{% elif cf_action == 'delete_record' %}RECORD | Action=delete | Success={{ (delete_result.json.success if (delete_result is defined and delete_result.json is defined and delete_result.json.success is defined) else 'unknown') }} | ID={{ (delete_result.json.result.id if (delete_result is defined and delete_result.json is defined and delete_result.json.result is defined and delete_result.json.result.id is defined) else record_id | default('N/A')) }} | Errors={{ (delete_result.json.errors if (delete_result is defined and delete_result.json is defined and delete_result.json.errors is defined) else []) }}{% else %}RECORD | No action performed{% endif %}
 
     - name: Sync platform records (apply standard records to all domains)
       when: cf_action == 'sync'

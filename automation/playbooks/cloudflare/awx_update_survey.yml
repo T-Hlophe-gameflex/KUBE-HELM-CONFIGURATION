@@ -1,0 +1,16 @@
+survey:
+  name: Cloudflare AWX Survey
+  description: Survey for Cloudflare automation actions
+  spec:
+    - question_name: Cloudflare Action
+      variable: cf_action
+      type: multiplechoice
+      choices:
+        - create_record
+        - update_record
+        - delete_record
+        - clone_record
+        - apply_page_rule
+      required: true
+      default: create_record
+      description: "Select the Cloudflare action to perform (required)."
