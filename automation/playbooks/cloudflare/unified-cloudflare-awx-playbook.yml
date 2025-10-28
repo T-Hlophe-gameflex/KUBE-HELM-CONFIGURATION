@@ -131,7 +131,21 @@
         - name: Output record operation result
           debug:
             msg: >-
-              {{ record_result.json if cf_action in ['create_record', 'update_record'] else delete_result.json if cf_action == 'delete_record' else 'No action performed.' }}
+              {% if cf_action in ['create_record', 'update_record'] %}
+                {% if record_result is defined and record_result.json is defined %}
+                  {{ record_result.json }}
+                {% else %}
+                  Record result not available.
+                {% endif %}
+              {% elif cf_action == 'delete_record' %}
+                {% if delete_result is defined and delete_result.json is defined %}
+                  {{ delete_result.json }}
+                {% else %}
+                  Delete result not available.
+                {% endif %}
+              {% else %}
+                No action performed.
+              {% endif %}
 
     - name: Sync platform records (apply standard records to all domains)
       when: cf_action == 'sync'
