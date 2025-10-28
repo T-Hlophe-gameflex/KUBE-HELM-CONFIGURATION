@@ -282,6 +282,7 @@
             var: record_payload_preview.stdout
 
         - name: Create or update record (send rendered JSON) — attempt uri first (may fail)
+          # tolerate failures here so we can fallback to curl and capture Cloudflare's raw response
           uri:
             url: >-
               https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}
@@ -296,6 +297,7 @@
             validate_certs: true
           when: (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
           register: record_result
+          ignore_errors: yes
 
         - name: Fallback to curl if uri call failed
           shell: >-
