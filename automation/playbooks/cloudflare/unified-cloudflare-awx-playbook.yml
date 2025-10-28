@@ -158,8 +158,7 @@
               block:
                 - name: Try to parse clone payload
                   command: >-
-                    {{ ansible_playbook_python | default('python3') }} -c "import json,sys
-                    json.load(open('/tmp/clone_payload_' + '{{ inventory_hostname }}' + '.json'))"
+                    {{ ansible_playbook_python | default('python3') }} -c "import json,sys; json.load(open('/tmp/clone_payload_{{ inventory_hostname }}.json'))"
                   register: clone_json_check
                   ignore_errors: true
                 - name: Show clone payload on parse failure
@@ -289,8 +288,7 @@
           block:
             - name: Try to parse record payload
               command: >-
-                {{ ansible_playbook_python | default('python3') }} -c "import json,sys
-                json.load(open('/tmp/record_payload_' + '{{ inventory_hostname }}' + '.json'))"
+                {{ ansible_playbook_python | default('python3') }} -c "import json,sys; json.load(open('/tmp/record_payload_{{ inventory_hostname }}.json'))"
               register: record_json_check
               ignore_errors: true
             - name: Show record payload on parse failure
