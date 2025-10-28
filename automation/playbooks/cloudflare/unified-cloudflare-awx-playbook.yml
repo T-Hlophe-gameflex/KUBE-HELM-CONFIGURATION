@@ -4,9 +4,10 @@
   gather_facts: false
   tasks:
 
-    - name: Debug Cloudflare API token (for troubleshooting only)
+    - name: Debug Cloudflare API token presence (name only, value masked)
       debug:
-        msg: "CLOUDFLARE_API_TOKEN = {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+        msg: >-
+          Cloudflare API token name: {{ lookup('env','CLOUDFLARE_API_TOKEN_NAME') | default('unspecified') }}; token: {{ (lookup('env','CLOUDFLARE_API_TOKEN') | default('') ) | regex_replace('(.{4}).*(.{4})','\\1...\\2') if (lookup('env','CLOUDFLARE_API_TOKEN') | default('') | length) > 8 else ('***' if (lookup('env','CLOUDFLARE_API_TOKEN') | default('') | length) > 0 else 'not set') }}
       no_log: false
 
     - name: Show selected action and input
@@ -95,8 +96,121 @@
           set_fact:
             record_id: "{{ record_id | default('') }}"
         - name: Output all DNS records for this domain (debug)
+          # Show a concise list: name (type) -> content
+          debug:
+            msg: >-
+              {% set rows = [] %}
+              {% for r in all_records_lookup.json.result %}
+                {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
+              {% endfor %}
+              {{ rows }}
+
+        - name: Optionally show full DNS records JSON when debug_curl is true
           debug:
             var: all_records_lookup.json.result
+          when: debug_curl | default(false)
+
+        - name: Build simple domains and records lists for dropdowns
+          set_fact:
+            domains_list: >-
+              {{ (all_zones.json.result | map(attribute='name') | list) if (all_zones is defined and all_zones.json is defined and all_zones.json.result|length > 0) else [domain] }}
+            records_list_names: >-
+              {{ (all_records_lookup.json.result | map(attribute='name') | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
+            records_list_objects: >-
+              {{ (all_records_lookup.json.result | map(attribute=None) | map('combine', {}) | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
+
+        - name: Write dropdown files to project (domains and records) when enabled
+          block:
+            - name: Ensure dropdowns dir exists
+              file:
+                path: "{{ playbook_dir }}/awx_dropdowns"
+                state: directory
+                mode: '0755'
+
+            - name: Write domains list JSON
+              copy:
+                content: "{{ domains_list | to_json }}"
+                dest: "{{ playbook_dir }}/awx_dropdowns/domains.json"
+                mode: '0644'
+
+            - name: Write records list JSON for domain (names)
+              copy:
+                content: "{{ records_list_names | to_json }}"
+                dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.json"
+                mode: '0644'
+
+            - name: Write records objects JSON for domain (detailed)
+              copy:
+                content: "{{ records_list_objects | to_json }}"
+                dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.objects.json"
+                mode: '0644'
+
+            - name: Optionally commit & push dropdown files to repo
+              when: update_repo_dropdown_files | default(false)
+              block:
+                - name: git add dropdown files
+                  command: >-
+                    git add {{ playbook_dir }}/awx_dropdowns/domains.json {{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.json
+                  args:
+                    chdir: "{{ playbook_dir }}"
+                - name: git commit dropdown files
+                  command: >-
+                    git commit -m "chore: update awx dropdowns (domains/records)" || true
+                  args:
+                    chdir: "{{ playbook_dir }}"
+                - name: git push dropdown files
+                  command: >-
+                    git push || true
+                  args:
+                    chdir: "{{ playbook_dir }}"
+          when: update_awx_surveys | default(false)
+
+        - name: Optionally PATCH AWX job template survey questions with new choices
+          when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
+          block:
+            - name: Get current AWX job template
+              uri:
+                url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ awx_token }}"
+                  Content-Type: "application/json"
+                return_content: true
+                validate_certs: "{{ awx_validate_certs | default(true) }}"
+              register: awx_job_template
+
+            - name: Build updated survey_spec by replacing choices for selected_domain/selected_record_name
+              set_fact:
+                awx_survey_spec: >-
+                  {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+                  {% set questions = spec.spec | default([]) %}
+                  {% for q in questions %}
+                    {% if q.variable == 'selected_domain' %}
+                      {% set _ = q.update({'choices': (domains_list | join(','))}) %}
+                    {% elif q.variable == 'selected_record_name' %}
+                      {% set _ = q.update({'choices': (records_list | join(','))}) %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ spec }}
+
+            - name: Patch AWX job template with updated survey_spec
+              uri:
+                url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+                method: PATCH
+                headers:
+                  Authorization: "Bearer {{ awx_token }}"
+                  Content-Type: "application/json"
+                body_format: json
+                body:
+                  survey_enabled: true
+                  survey_spec: "{{ awx_survey_spec }}"
+                return_content: true
+                validate_certs: "{{ awx_validate_certs | default(true) }}"
+              register: awx_patch_result
+          rescue:
+            - name: Warn AWX survey update failed
+              debug:
+                msg: "AWX survey update failed or was not possible; check AWX API settings or token"
         - name: Set effective record name (from dropdown or input)
           set_fact:
             effective_record_name: >-
@@ -124,6 +238,28 @@
               {% else %}
                 ''
               {% endif %}
+
+        - name: Critical info summary (concise)
+          debug:
+            msg: |-
+              ACTION: {{ cf_action | default('undefined') }}
+              DOMAIN: {{ domain | default('undefined') }}
+              FQDN: {{ fq_record_name | default('') }}
+              TYPE: {{ record_type | default('') }}
+              EFFECTIVE_NAME: {{ effective_record_name | default('') }}
+              RESOLVED_RECORD_ID: {{ record_id | default('not-resolved') }}
+              RECORD_ID_SOURCE: >-
+                {% if record_id is defined and record_id != '' and (record_lookup is defined and record_lookup.json is defined and record_lookup.json.result | length > 0 and record_lookup.json.result[0].id == record_id) %}api-lookup{% elif record_id is defined and record_id != '' %}provided-or-local-scan{% else %}none{% endif %}
+              TTL: {{ numeric_ttl | default('3600') }}
+              PROXIED: {{ global_proxied | default(false) }}
+              PAYLOAD_FILE: /tmp/record_payload_{{ inventory_hostname }}.json
+              RECORDS_SUMMARY: >-
+                {% set rows = [] %}
+                {% for r in (all_records_lookup.json.result if (all_records_lookup is defined and all_records_lookup.json is defined) else [])[:10] %}
+                  {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
+                {% endfor %}
+                {{ rows }}
+          when: cf_action in ['create_record','update_record','delete_record','clone_record']
 
         - name: Clone record (if requested)
           when: cf_action == 'clone_record'
@@ -460,6 +596,98 @@
               {% else %}
                 No action performed.
               {% endif %}
+
+        - name: Result summary — one-line outcome and Cloudflare record URL
+          debug:
+            msg: >-
+              {% set success = (cf_action in ['create_record','update_record'] and record_result is defined and record_result.json and record_result.json.success) or (cf_action == 'delete_record' and delete_result is defined and delete_result.json and delete_result.json.success) or (cf_action == 'clone_record' and clone_result is defined and clone_result.json and clone_result.json.success) %}
+              {% if success %}
+                {{ cf_action | upper }} SUCCEEDED: id={{ (record_result.json.result.id if (record_result is defined and record_result.json and record_result.json.result is defined) else (clone_result.json.result.id if (clone_result is defined and clone_result.json and clone_result.json.result is defined) else delete_result.json.result.id if (delete_result is defined and delete_result.json and delete_result.json.result is defined) else record_id | default('N/A'))) }}; view: https://dash.cloudflare.com/{{ (zone_id | default('')) }}/{{ (domain | default('')) }}/dns-records/details/{{ (record_result.json.result.id if (record_result is defined and record_result.json and record_result.json.result is defined) else (clone_result.json.result.id if (clone_result is defined and clone_result.json and clone_result.json.result is defined) else delete_result.json.result.id if (delete_result is defined and delete_result.json and delete_result.json.result is defined) else record_id | default('')) }}
+              {% else %}
+                {{ cf_action | upper }} FAILED: check above details; record_id={{ record_id | default('N/A') }}
+              {% endif %}
+          when: cf_action in ['create_record','update_record','delete_record','clone_record']
+
+        - name: Standardize zone settings after DNS operation (apply domain-level and global defaults)
+          when: cf_action in ['create_record','update_record','delete_record','clone_record','standardize']
+          block:
+            - name: Ensure we have a zone_id
+              fail:
+                msg: "Cannot standardize zone settings because zone_id is not set for {{ domain }}"
+              when: zone_id is not defined or zone_id == ''
+
+            - name: Apply standard zone settings (domain-level)
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
+                method: PATCH
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                  Content-Type: "application/json"
+                body_format: json
+                body:
+                  value: "{{ item.value }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
+              register: post_zone_settings_result
+
+            - name: Apply global record defaults to existing records (enforce TTL/proxied for same-type records)
+              block:
+                - name: Build list of record types to enforce
+                  set_fact:
+                    enforce_types: "{{ standard_record_types | default(['A','AAAA','CNAME','TXT','MX']) }}"
+
+                - name: For each enforce type, standardize records under this zone
+                  loop: "{{ enforce_types }}"
+                  loop_control:
+                    loop_var: enforce_type
+                  block:
+                    - name: Filter records by type
+                      set_fact:
+                        records_of_type: >-
+                          {{ (all_records_lookup.json.result | selectattr('type','equalto', enforce_type) | list) if (all_records_lookup is defined and all_records_lookup.json is defined) else [] }}
+
+                    - name: Ensure each record of this type matches global TTL/proxied (patch if necessary)
+                      loop: "{{ records_of_type }}"
+                      loop_control:
+                        label: "{{ item.name }}"
+                      when: records_of_type | length > 0
+                      block:
+                        - name: Determine desired ttl and proxied for this record
+                          set_fact:
+                            desired_ttl: "{{ (record_ttl_overrides[item.type] | default(numeric_ttl | default(3600))) if (record_ttl_overrides is defined) else (numeric_ttl | default(3600)) }}"
+                            desired_proxied: "{{ (record_proxied_overrides[item.type] | default(global_proxied | default(false))) if (record_proxied_overrides is defined) else (global_proxied | default(false)) }}"
+
+                        - name: Patch record if ttl or proxied differ
+                          when: (item.ttl | int) != (desired_ttl | int) or ((item.proxied | default(false)) | bool) != (desired_proxied | bool)
+                          uri:
+                            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ item.id }}"
+                            method: PUT
+                            headers:
+                              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                              Content-Type: "application/json"
+                            body_format: json
+                            body:
+                              ttl: "{{ desired_ttl | int }}"
+                              proxied: "{{ desired_proxied | bool }}"
+                            return_content: true
+                            validate_certs: "{{ cf_validate_certs | default(true) }}"
+                          register: record_standardize_result
+
+            - name: Output per-domain concise summary (grouped by type)
+              debug:
+                msg: |-
+                  Domain: {{ domain }}
+                  Zone ID: {{ zone_id }}
+                  Standard Zone Settings Applied: {{ post_zone_settings_result.results | length if post_zone_settings_result is defined else 'N/A' }}
+                  Record types summary:
+                  {% for t in (standard_record_types | default(['A','AAAA','CNAME','TXT','MX'])) %}
+                    - {{ t }}: {{ (all_records_lookup.json.result | selectattr('type','equalto',t) | list) | length if (all_records_lookup is defined and all_records_lookup.json is defined) else 0 }} records
+                      {% for r in (all_records_lookup.json.result | selectattr('type','equalto',t) | list)[:5] %}
+                        - {{ r.name }} (ttl={{ r.ttl }}, proxied={{ r.proxied | default(false) }})
+                      {% endfor %}
+                  {% endfor %}
+              when: all_records_lookup is defined and all_records_lookup.json is defined
 
     - name: Sync platform records (apply standard records to all domains)
       when: cf_action == 'sync'
