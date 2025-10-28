@@ -562,24 +562,10 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: delete_result
-        - name: Output record operation result
+        - name: Output record operation result (single-line)
           debug:
             msg: >-
-              {% if cf_action in ['create_record', 'update_record'] %}
-                {% if record_result is defined and record_result.json is defined %}
-                  {{ record_result.json }}
-                {% else %}
-                  Record result not available.
-                {% endif %}
-              {% elif cf_action == 'delete_record' %}
-                {% if delete_result is defined and delete_result.json is defined %}
-                  {{ delete_result.json }}
-                {% else %}
-                  Delete result not available.
-                {% endif %}
-              {% else %}
-                No action performed.
-              {% endif %}
+              {% if cf_action in ['create_record','update_record'] %}RECORD | Action={{ cf_action }} | Success={{ (record_result.json.success if (record_result is defined and record_result.json is defined and record_result.json.success is defined) else 'unknown') }} | ID={{ (record_result.json.result.id if (record_result is defined and record_result.json is defined and record_result.json.result is defined and record_result.json.result.id is defined) else 'N/A') }} | Errors={{ (record_result.json.errors if (record_result is defined and record_result.json is defined and record_result.json.errors is defined) else []) }}{% elif cf_action == 'delete_record' %}RECORD | Action=delete | Success={{ (delete_result.json.success if (delete_result is defined and delete_result.json is defined and delete_result.json.success is defined) else 'unknown') }} | ID={{ (delete_result.json.result.id if (delete_result is defined and delete_result.json is defined and delete_result.json.result is defined and delete_result.json.result.id is defined) else record_id | default('N/A')) }} | Errors={{ (delete_result.json.errors if (delete_result is defined and delete_result.json is defined and delete_result.json.errors is defined) else []) }}{% else %}RECORD | No action performed{% endif %}
 
     - name: Sync platform records (apply standard records to all domains)
       when: cf_action == 'sync'
@@ -599,60 +585,37 @@
           loop_control:
             loop_var: zone
 
-    - name: Output global settings summary (structured)
+    - name: Output global settings summary (single-line | separated)
       debug:
-        msg: |-
-          GLOBAL SETTINGS SUMMARY
-          -----------------------
-          TTL (default): {{ global_ttl | default(3600) }}
-          Proxied by default: {{ global_proxied | default(false) }}
-          Standard zone settings:
-          {% for k, v in (standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) ) | dict2items %}
-            - {{ k }}: {{ v }}
-          {% endfor %}
+        msg: >-
+          GLOBAL | TTL={{ global_ttl | default(3600) }} | Proxied={{ global_proxied | default(false) }} | ZoneSettings={{ (standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) ) | dict2items | map('join',':') | join(',') }}
 
     - name: Output domain settings summary (structured)
       when: domain is defined and domain|length > 0
       block:
-        - name: Domain settings header
+        - name: Domain settings header (single-line)
           debug:
-            msg: |-
-              DOMAIN SETTINGS SUMMARY
-              -----------------------
-              Domain: {{ domain }}
-              Zone ID: {{ zone_id | default('N/A') }}
+            msg: >-
+              DOMAIN | {{ domain }} | ZoneID={{ zone_id | default('N/A') }}
 
         - name: Domain zone setting - {{ item.item.key }}
           debug:
             msg: >-
-              - {{ item.item.key }}: {% if item.json is defined and item.json.result is defined and item.json.result.value is defined %}{{ item.json.result.value }}{% elif item.skipped | default(false) %}SKIPPED ({{ item.skip_reason | default('unspecified') }}){% elif item.failed | default(false) %}FAILED{% else %}unknown (see full result){% endif %}
+              SETTING | {{ item.item.key }}={{ (item.json.result.value if (item.json is defined and item.json.result is defined and item.json.result.value is defined) else ("SKIPPED(" ~ (item.skip_reason | default('unspecified')) ~ ")" if item.skipped | default(false) else ("FAILED" if item.failed | default(false) else 'unknown'))) }}
           loop: "{{ zone_settings_result.results if (zone_settings_result is defined and zone_settings_result.results is defined) else [] }}"
           when: zone_settings_result is defined and zone_settings_result.results is defined
         - name: Domain zone settings none
           debug:
-            msg: "- N/A"
+            msg: "DOMAIN | No zone settings applied"
           when: zone_settings_result is not defined or zone_settings_result.results is not defined
 
-    - name: Output platform sync summary (structured)
+    - name: Output platform sync summary (single-line)
       when: cf_action == 'sync'
       debug:
-        msg: |-
-          PLATFORM SYNC SUMMARY
-          ---------------------
-          Applied standard records to all domains.
-          Standard records:
-          {% for r in (standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}])) %}
-            - type: {{ r.type }}, name: {{ r.name }}, value: {{ r.value }}, ttl: {{ r.ttl }}, proxied: {{ r.proxied }}
-          {% endfor %}
+        msg: >-
+          PLATFORM | Applied={{ 'yes' if (standard_records | default([])) | length > 0 else 'no' }} | Records={{ (standard_records | default([{'type': 'A', 'name': 'www', 'value': '1.2.3.4', 'ttl': 3600, 'proxied': false}])) | map('dict2items') | map('map','join',':') | map('join',',') | join(';') }}
 
-    - name: Output summary of all actions (structured)
+    - name: Output summary of all actions (single-line)
       debug:
-        msg: |-
-          UNIFIED PLAYBOOK SUMMARY
-          ------------------------
-          Action: {{ cf_action | default('N/A') }}
-          Domain: {{ domain | default('N/A') }}
-          FQDN (if applicable): {{ fq_record_name | default('N/A') | trim }}
-          Record Type: {{ record_type | default('N/A') }}
-          Resolved Record ID: {{ record_id | default('N/A') }}
-          See earlier sections for detailed per-step outputs and payload files under /tmp/record_payload_{{ inventory_hostname }}.json
+        msg: >-
+          SUMMARY | Action={{ cf_action | default('N/A') }} | Domain={{ domain | default('N/A') }} | FQDN={{ fq_record_name | default('N/A') | trim }} | Type={{ record_type | default('N/A') }} | RecordID={{ record_id | default('N/A') }} | Payload=/tmp/record_payload_{{ inventory_hostname }}.json
