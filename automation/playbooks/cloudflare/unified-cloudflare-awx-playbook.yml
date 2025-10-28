@@ -130,11 +130,43 @@
                 headers:
                   Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
                   Content-Type: "application/json"
-                body_format: json
-                body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
+                # validate JSON payload before sending
+                body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') }}"
                 return_content: true
                 validate_certs: false
               register: clone_result
+
+            - name: Validate clone JSON payload (python)
+              block:
+                - name: Try to parse clone payload
+                  command: >-
+                    {{ ansible_playbook_python | default('python3') }} -c "import json,sys
+                    json.load(open('/tmp/clone_payload_' + '{{ inventory_hostname }}' + '.json'))"
+                  register: clone_json_check
+                  ignore_errors: true
+                - name: Show clone payload on parse failure
+                  when: clone_json_check.rc != 0
+                  shell: cat /tmp/clone_payload_{{ inventory_hostname }}.json
+                  register: clone_payload_dump
+                - name: Fail with clone payload content (invalid JSON)
+                  when: clone_json_check.rc != 0
+                  fail:
+                    msg: "Clone payload JSON is invalid: {{ clone_payload_dump.stdout }}"
+
+            - name: Optional curl POST for clone payload (debug)
+              when: debug_curl | default(false)
+              shell: >-
+                curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
+                  -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                  -H "Content-Type: application/json"
+                  --data-binary @/tmp/clone_payload_{{ inventory_hostname }}.json
+              args:
+                executable: /bin/bash
+              register: clone_curl_result
+            - name: Debug clone curl result
+              when: debug_curl | default(false)
+              debug:
+                var: clone_curl_result.stdout
 
 
             - name: Output clone operation result
@@ -186,11 +218,43 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
               Content-Type: "application/json"
-            body_format: json
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
+            # validate JSON payload before sending
+            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
             return_content: true
             validate_certs: false
           register: record_result
+
+        - name: Validate record JSON payload (python)
+          block:
+            - name: Try to parse record payload
+              command: >-
+                {{ ansible_playbook_python | default('python3') }} -c "import json,sys
+                json.load(open('/tmp/record_payload_' + '{{ inventory_hostname }}' + '.json'))"
+              register: record_json_check
+              ignore_errors: true
+            - name: Show record payload on parse failure
+              when: record_json_check.rc != 0
+              shell: cat /tmp/record_payload_{{ inventory_hostname }}.json
+              register: record_payload_dump
+            - name: Fail with record payload content (invalid JSON)
+              when: record_json_check.rc != 0
+              fail:
+                msg: "Record payload JSON is invalid: {{ record_payload_dump.stdout }}"
+
+        - name: Optional curl POST for record payload (debug)
+          when: debug_curl | default(false)
+          shell: >-
+            curl -sS -X {{ 'PUT' if cf_action == 'update_record' and record_id else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ record_id if record_id and cf_action == 'update_record' else '' }}"
+              -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+              -H "Content-Type: application/json"
+              --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
+          args:
+            executable: /bin/bash
+          register: record_curl_result
+        - name: Debug record curl result
+          when: debug_curl | default(false)
+          debug:
+            var: record_curl_result.stdout
 
         # debug payload task removed to avoid YAML parsing issues
         
