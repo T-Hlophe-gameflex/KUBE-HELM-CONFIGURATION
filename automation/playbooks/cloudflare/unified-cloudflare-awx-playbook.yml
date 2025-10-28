@@ -123,6 +123,24 @@
                 dest: "/tmp/clone_payload_{{ inventory_hostname }}.json"
                 mode: '0644'
 
+            - name: Load clone payload from file
+              set_fact:
+                clone_payload_parsed: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
+
+            - name: Validate clone payload structure
+              assert:
+                that:
+                  - "clone_payload_parsed is mapping"
+                  - "'type' in clone_payload_parsed"
+                  - "'name' in clone_payload_parsed"
+                  - "'content' in clone_payload_parsed"
+                  - "clone_payload_parsed.ttl is number"
+                fail_msg: "Clone payload failed validation: {{ clone_payload_parsed }}"
+
+            - name: Show clone payload being sent
+              debug:
+                var: clone_payload_parsed
+
             - name: Create cloned record (send rendered JSON)
               uri:
                 url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
@@ -131,7 +149,7 @@
                   Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
                   Content-Type: "application/json"
                 body_format: json
-                body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
+                body: "{{ clone_payload_parsed }}"
                 return_content: true
                 validate_certs: false
               register: clone_result
@@ -178,6 +196,25 @@
             dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
             mode: '0644'
 
+        - name: Load record payload from file
+          set_fact:
+            record_payload_parsed: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
+
+        - name: Validate record payload structure
+          assert:
+            that:
+              - "record_payload_parsed is mapping"
+              - "'type' in record_payload_parsed"
+              - "'name' in record_payload_parsed"
+              - "'content' in record_payload_parsed"
+              - "record_payload_parsed.ttl is number"
+            fail_msg: "Record payload failed validation: {{ record_payload_parsed }}"
+
+        - name: 
+          debug:
+            msg: Show record payload being sent
+            var: record_payload_parsed
+
         - name: Create or update record (send rendered JSON)
           uri:
             url: >-
@@ -187,7 +224,7 @@
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
               Content-Type: "application/json"
             body_format: json
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
+            body: "{{ record_payload_parsed }}"
             return_content: true
             validate_certs: false
           register: record_result
