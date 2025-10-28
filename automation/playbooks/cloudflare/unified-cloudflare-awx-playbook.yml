@@ -14,23 +14,6 @@
       debug:
         msg: "Action: {{ cf_action | default('undefined') }}, Domain: {{ domain | default('undefined') }}, Record: {{ record_name | default(selected_record_name | default('undefined')) }} ({{ record_type | default('undefined') }})"
 
-    - name: Define zone setting mappings for Cloudflare API compatibility
-      set_fact:
-        cf_zone_setting_mappings:
-          always_use_https:
-            true: "on"
-            false: "off"
-          cache_level:
-            standard: standard
-            basic: basic
-            simplified: simplified
-            aggressive: aggressive
-          min_tls_version:
-            '1.0': '1.0'
-            '1.1': '1.1'
-            '1.2': '1.2'
-            '1.3': '1.3'
-
     - name: Create domain (zone) if requested
       when: cf_action == 'create_domain'
       block:
@@ -55,7 +38,7 @@
     - name: Standardize domain settings (always runs after create_domain or on demand)
       when: cf_action in ['create_domain', 'standardize', 'sync']
       block:
-        - name: Get zone ID for domain (uri)
+        - name: Get zone ID for domain
           uri:
             url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
             method: GET
@@ -64,25 +47,10 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: zone_lookup
-          when: not (cf_force_curl | default(false) | bool)
-
-        - name: Get zone ID for domain (curl fallback)
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} "https://api.cloudflare.com/client/v4/zones?name={{ domain }}" -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          args:
-            executable: /bin/bash
-          register: zone_lookup_curl
-          when: cf_force_curl | default(false) | bool
-
-        - name: Normalize zone_lookup when curl used
-          set_fact:
-            zone_lookup: "{{ {'json': (zone_lookup_curl.stdout | default('') | from_json) } }}"
-          when: zone_lookup_curl is defined and zone_lookup_curl.stdout is defined
         - name: Set zone_id fact
           set_fact:
             zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
-
-        - name: Apply standard zone settings (domain-level via uri)
+        - name: Apply standard zone settings
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
             method: PATCH
@@ -91,8 +59,7 @@
               Content-Type: "application/json"
             body_format: json
             body:
-              value: >-
-                {{ (cf_zone_setting_mappings[item.key][item.value | string] if (cf_zone_setting_mappings is defined and item.key in cf_zone_setting_mappings and (item.value | string) in cf_zone_setting_mappings[item.key]) else ('on' if (item.key == 'always_use_https' and (item.value | bool)) else ('off' if (item.key == 'always_use_https') else item.value))) }}
+              value: "{{ item.value }}"
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
@@ -104,7 +71,7 @@
     - name: Manage DNS record (create/update/delete)
       when: cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
       block:
-        - name: Get zone ID for domain (uri)
+        - name: Get zone ID for domain
           uri:
             url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
             method: GET
@@ -113,24 +80,10 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: zone_lookup
-          when: not (cf_force_curl | default(false) | bool)
-
-        - name: Get zone ID for domain (curl fallback)
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} "https://api.cloudflare.com/client/v4/zones?name={{ domain }}" -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          args:
-            executable: /bin/bash
-          register: zone_lookup_curl
-          when: cf_force_curl | default(false) | bool
-
-        - name: Normalize zone_lookup when curl used
-          set_fact:
-            zone_lookup: "{{ {'json': (zone_lookup_curl.stdout | default('') | from_json) } }}"
-          when: zone_lookup_curl is defined and zone_lookup_curl.stdout is defined
         - name: Set zone_id fact
           set_fact:
             zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
-        - name: List all DNS records for this domain (uri)
+        - name: List all DNS records for this domain (debug)
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
             method: GET
@@ -139,20 +92,6 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: all_records_lookup
-          when: not (cf_force_curl | default(false) | bool)
-
-        - name: List all DNS records for this domain (curl fallback)
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records" -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          args:
-            executable: /bin/bash
-          register: all_records_lookup_curl
-          when: cf_force_curl | default(false) | bool
-
-        - name: Normalize all_records_lookup when curl used
-          set_fact:
-            all_records_lookup: "{{ {'json': (all_records_lookup_curl.stdout | default('') | from_json) } }}"
-          when: all_records_lookup_curl is defined and all_records_lookup_curl.stdout is defined
         - name: Ensure record_id has a default (allow passing record_id directly)
           set_fact:
             record_id: "{{ record_id | default('') }}"
@@ -437,34 +376,16 @@
               debug:
                 var: clone_result.json
 
-        - name: Ensure fq_record_name is trimmed for lookup
-          set_fact:
-            fq_record_name_trimmed: "{{ (fq_record_name | trim) if fq_record_name is defined else '' }}"
-          when: fq_record_name is defined and fq_record_name | length > 0
-
-        - name: Find existing record (if any) (uri)
+        - name: Find existing record (if any)
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name_trimmed | urlencode }}"
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name | urlencode }}"
             method: GET
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_lookup
-          when: (record_id is not defined or record_id == '') and record_type is defined and fq_record_name_trimmed is defined and fq_record_name_trimmed | length > 0 and not (cf_force_curl | default(false) | bool)
-
-        - name: Find existing record (if any) (curl fallback)
-          shell: >-
-            curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name_trimmed | urlencode }}" -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          args:
-            executable: /bin/bash
-          register: record_lookup_curl
-          when: (record_id is not defined or record_id == '') and record_type is defined and fq_record_name_trimmed is defined and fq_record_name_trimmed | length > 0 and (cf_force_curl | default(false) | bool)
-
-        - name: Normalize record_lookup when curl used
-          set_fact:
-            record_lookup: "{{ {'json': (record_lookup_curl.stdout | default('') | from_json) } }}"
-          when: record_lookup_curl is defined and record_lookup_curl.stdout is defined
+          when: (record_id is not defined or record_id == '') and record_type is defined and fq_record_name is defined and fq_record_name | length > 0
         - name: Set record_id from API lookup if available
           set_fact:
             record_id: "{{ record_lookup.json.result[0].id }}"
@@ -675,141 +596,6 @@
               {% else %}
                 No action performed.
               {% endif %}
-
-        - name: Compute result summary success flag
-          set_fact:
-            result_summary_success: >-
-              {{ (record_result is defined and record_result.json is defined and record_result.json.success) or (delete_result is defined and delete_result.json is defined and delete_result.json.success) or (clone_result is defined and clone_result.json is defined and clone_result.json.success) }}
-          when: cf_action in ['create_record','update_record','delete_record','clone_record']
-
-        - name: Compute result summary id from record_result
-          set_fact:
-            result_summary_id: "{{ record_result.json.result.id }}"
-          when: cf_action in ['create_record','update_record','delete_record','clone_record'] and record_result is defined and record_result.json is defined and (record_result.json.result is not none) and (record_result.json.result.id is defined)
-
-        - name: Compute result summary id from clone_result if not set
-          set_fact:
-            result_summary_id: "{{ clone_result.json.result.id }}"
-          when: cf_action in ['create_record','update_record','delete_record','clone_record'] and (result_summary_id is not defined or result_summary_id == '') and clone_result is defined and clone_result.json is defined and (clone_result.json.result is not none) and (clone_result.json.result.id is defined)
-
-        - name: Compute result summary id from delete_result if not set
-          set_fact:
-            result_summary_id: "{{ delete_result.json.result.id }}"
-          when: cf_action in ['create_record','update_record','delete_record','clone_record'] and (result_summary_id is not defined or result_summary_id == '') and delete_result is defined and delete_result.json is defined and (delete_result.json.result is not none) and (delete_result.json.result.id is defined)
-
-        - name: Fallback result summary id to provided record_id
-          set_fact:
-            result_summary_id: "{{ record_id | default('N/A') }}"
-          when: cf_action in ['create_record','update_record','delete_record','clone_record'] and (result_summary_id is not defined or result_summary_id == '')
-
-        - name: Result summary — one-line outcome and Cloudflare record URL
-          debug:
-            msg: >-
-              {% if result_summary_success | bool %}
-                {{ cf_action | upper }} SUCCEEDED: id={{ result_summary_id }}; view: https://dash.cloudflare.com/{{ zone_id | default('') }}/{{ domain | default('') }}/dns-records/details/{{ result_summary_id }}
-              {% else %}
-                {{ cf_action | upper }} FAILED: check above details; record_id={{ result_summary_id }}
-              {% endif %}
-          when: cf_action in ['create_record','update_record','delete_record','clone_record']
-
-        - name: Standardize zone settings after DNS operation (apply domain-level and global defaults)
-          when: cf_action in ['create_record','update_record','delete_record','clone_record','standardize']
-          block:
-            - name: Ensure we have a zone_id
-              fail:
-                msg: "Cannot standardize zone settings because zone_id is not set for {{ domain }}"
-              when: zone_id is not defined or zone_id == ''
-
-            - name: Apply standard zone settings (domain-level via uri)
-              uri:
-                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
-                method: PATCH
-                headers:
-                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-                  Content-Type: "application/json"
-                body_format: json
-                body:
-                  value: >-
-                    {{ (cf_zone_setting_mappings[item.key][item.value | string] if (cf_zone_setting_mappings is defined and item.key in cf_zone_setting_mappings and (item.value | string) in cf_zone_setting_mappings[item.key]) else ('on' if (item.key == 'always_use_https' and (item.value | bool)) else ('off' if (item.key == 'always_use_https') else item.value))) }}
-                return_content: true
-                validate_certs: "{{ cf_validate_certs | default(true) }}"
-              loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
-              register: post_zone_settings_result
-              ignore_errors: true
-              when: not (cf_force_curl | default(false) | bool)
-
-            - name: Apply standard zone settings (domain-level via curl fallback)
-              vars:
-                cf_setting_value: "{{ 'on' if (item.key == 'always_use_https' and (item.value | bool)) else ('off' if (item.key == 'always_use_https') else item.value) }}"
-                cf_zone_setting_payload: "{{ {'value': cf_setting_value} | to_json }}"
-              shell: >-
-                curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X PATCH "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}" \
-                  -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
-                  -H "Content-Type: application/json" \
-                  --data-binary '{{ cf_zone_setting_payload }}'
-              args:
-                executable: /bin/bash
-              loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
-              register: post_zone_settings_result_curl
-              failed_when: false
-              when: cf_force_curl | default(false) | bool
-
-            - name: Normalize post_zone_settings_result from curl fallback when needed
-              set_fact:
-                post_zone_settings_result: "{{ post_zone_settings_result_curl }}"
-              when: post_zone_settings_result is not defined and post_zone_settings_result_curl is defined
-
-            - name: Collect failed zone settings (uri results)
-              set_fact:
-                failed_zone_settings: >-
-                  {{ (post_zone_settings_result.results | default([])) | selectattr('failed','defined') | selectattr('failed') | list }}
-              when: post_zone_settings_result is defined
-
-            - name: Collect failed zone settings from curl fallback
-              set_fact:
-                failed_zone_settings: >-
-                  {{ (failed_zone_settings | default([])) + ((post_zone_settings_result_curl.results | default([])) | selectattr('rc','defined') | selectattr('rc') | list) }}
-              when: post_zone_settings_result_curl is defined
-
-            - name: Debug failed zone settings attempts (if any)
-              debug:
-                msg: >-
-                  Failed zone settings applied for domain {{ domain }}: {{ failed_zone_settings | default([]) }}
-              when: failed_zone_settings is defined and (failed_zone_settings | length) > 0
-
-            - name: Retry failed zone settings with alternative values
-              include_tasks: "{{ playbook_dir | default('.') }}/tasks/retry_zone_setting.yml"
-              loop: "{{ failed_zone_settings | default([]) }}"
-              loop_control:
-                loop_var: failed_item
-              when: failed_zone_settings is defined and (failed_zone_settings | length) > 0
-
-            - name: Apply global record defaults to existing records (enforce TTL/proxied for same-type records)
-              block:
-                - name: Build list of record types to enforce
-                  set_fact:
-                    enforce_types: "{{ standard_record_types | default(['A','AAAA','CNAME','TXT','MX']) }}"
-
-                - name: Standardize records per type (include tasks)
-                  include_tasks: standardize-records-per-type.yml
-                  loop: "{{ enforce_types }}"
-                  loop_control:
-                    loop_var: enforce_type
-
-            - name: Output per-domain concise summary (grouped by type)
-              debug:
-                msg: |-
-                  Domain: {{ domain }}
-                  Zone ID: {{ zone_id }}
-                  Standard Zone Settings Applied: {{ post_zone_settings_result.results | length if post_zone_settings_result is defined else 'N/A' }}
-                  Record types summary:
-                  {% for t in (standard_record_types | default(['A','AAAA','CNAME','TXT','MX'])) %}
-                    - {{ t }}: {{ (all_records_lookup.json.result | selectattr('type','equalto',t) | list) | length if (all_records_lookup is defined and all_records_lookup.json is defined) else 0 }} records
-                      {% for r in (all_records_lookup.json.result | selectattr('type','equalto',t) | list)[:5] %}
-                        - {{ r.name }} (ttl={{ r.ttl }}, proxied={{ r.proxied | default(false) }})
-                      {% endfor %}
-                  {% endfor %}
-              when: all_records_lookup is defined and all_records_lookup.json is defined
 
     - name: Sync platform records (apply standard records to all domains)
       when: cf_action == 'sync'
