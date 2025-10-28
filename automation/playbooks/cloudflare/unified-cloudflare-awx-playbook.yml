@@ -299,7 +299,7 @@
                        'name': (clone_record_name | default(effective_record_name)),
                        'content': (record_value | default(source_record.content | default(''))),
                        'ttl': (source_record.ttl | default(numeric_ttl|int if numeric_ttl is defined else 3600)) }
-                     ) | combine({'proxied': (source_record.proxied | default(global_proxied | default(false))) } if record_type in ['A','AAAA','CNAME'] else {})
+                     ) | combine({'proxied': (source_record.proxied | default(effective_proxied | default(false))) } if record_type in ['A','AAAA','CNAME'] else {})
                      | to_json }}
               when: not clone_payload_template_stat.stat.exists
 
@@ -421,6 +421,11 @@
           debug:
             msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
 
+        - name: Determine effective proxied flag (record-level overrides)
+          set_fact:
+            effective_proxied: >-
+              {% if record_proxied is defined %}{{ record_proxied | bool }}{% elif proxied is defined %}{{ proxied | bool }}{% else %}{{ global_proxied | default(false) | bool }}{% endif %}
+
         - name: Ensure record payload template exists in project
           stat:
             path: "{{ playbook_dir }}/templates/record_payload.json.j2"
@@ -434,7 +439,7 @@
                     'content': (( '"' ~ (record_value|default('') | replace('"','') | trim) ~ '"') if record_type == 'TXT' else (record_value|default(''))),
                     'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) }
                  )
-                 | combine({'proxied': (global_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
+                 | combine({'proxied': (effective_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
                  | to_json }}
           when: not record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
 
