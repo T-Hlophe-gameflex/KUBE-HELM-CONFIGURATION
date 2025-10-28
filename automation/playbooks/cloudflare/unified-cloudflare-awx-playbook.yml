@@ -103,6 +103,19 @@
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: page_rules_lookup
           when: zone_id is defined and zone_id | length > 0
+          ignore_errors: yes
+
+        - name: Normalize page rules lookup into simple facts
+          set_fact:
+            page_rules_count: >-
+              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success %}{{ page_rules_lookup.json.result|length }}{% else %}0{% endif %}
+            page_rules_ids: >-
+              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success %}{{ page_rules_lookup.json.result | map(attribute='id') | list | join(',') }}{% else %}''{% endif %}
+            page_rules_error_code: >-
+              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].code }}{% else %}''{% endif %}
+            page_rules_error_msg: >-
+              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].message }}{% else %}''{% endif %}
+          when: zone_id is defined and zone_id | length > 0
         - name: Ensure record_id has a default (allow passing record_id directly)
           set_fact:
             record_id: "{{ record_id | default('') }}"
@@ -618,7 +631,7 @@
         - name: Domain settings header (single-line)
           debug:
             msg: >-
-              DOMAIN | {{ domain }} | ZoneID={{ zone_id | default('N/A') }} | PageRulesCount={{ (page_rules_lookup.json.result | length) if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.result is defined) else 0 }} | PageRules={{ (page_rules_lookup.json.result | map(attribute='id') | list) | join(',') if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.result is defined) else 'none' }}
+              DOMAIN | {{ domain }} | ZoneID={{ zone_id | default('N/A') }} | PageRulesCount={{ page_rules_count | default(0) }} | PageRules={{ page_rules_ids | default('none') }}{% if page_rules_error_code | default('') != '' %} | PageRulesNote=ERROR_CODE_{{ page_rules_error_code }}: {{ page_rules_error_msg | default('') }}{% endif %}
 
         - name: Domain zone setting - {{ item.item.key }}
           debug:
