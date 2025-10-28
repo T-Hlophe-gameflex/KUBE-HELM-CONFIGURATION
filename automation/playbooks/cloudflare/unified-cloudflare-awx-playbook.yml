@@ -114,7 +114,26 @@
         - name: Set numeric TTL for record
           set_fact:
             numeric_ttl: >-
-              {% if global_ttl is defined and global_ttl is string and global_ttl|int > 0 %}{{ global_ttl|int }}{% elif global_ttl is defined and global_ttl is number and global_ttl > 0 %}{{ global_ttl }}{% else %}3600{% endif %}
+              {% if global_ttl is defined and (global_ttl is number or (global_ttl is string and global_ttl|int > 0)) %}{{ global_ttl|int }}{% else %}3600{% endif %}
+
+        - name: Debug numeric TTL value
+          debug:
+            msg: "numeric_ttl = {{ numeric_ttl }} (global_ttl = {{ global_ttl | default('undefined') }})"
+
+        - name: 
+          Debug: List all DNS records before delete
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: false
+          register: all_records_before_delete
+
+        - name: Output all DNS records before delete
+          debug:
+            var: all_records_before_delete.json.result
         - name: Create or update record
           when: cf_action in ['create_record', 'update_record']
           uri:
@@ -134,7 +153,8 @@
             return_content: true
             validate_certs: false
           register: record_result
-        - name: Debug: List all DNS records before delete
+        - name: 
+          Debug: List all DNS records before delete
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
             method: GET
