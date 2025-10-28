@@ -122,9 +122,22 @@
                 path: "{{ playbook_dir }}/templates/clone_payload.json.j2"
               register: clone_payload_template_stat
 
-            - name: Fail if clone payload template missing (AWX project sync may be needed)
-              fail:
-                msg: "Template clone_payload.json.j2 not found in project path {{ playbook_dir }}/templates. Please sync the AWX project or add the template file."
+            - name: Build fallback clone payload JSON from source_record/vars (if template missing)
+              set_fact:
+                clone_payload_json: >-
+                  {{ ({'type': record_type,
+                       'name': (clone_record_name | default(effective_record_name)),
+                       'content': (record_value | default(source_record.content | default(''))),
+                       'ttl': (source_record.ttl | default(numeric_ttl|int if numeric_ttl is defined else 3600)) }
+                     ) | combine({'proxied': (source_record.proxied | default(global_proxied | default(false))) } if record_type in ['A','AAAA','CNAME'] else {})
+                     | to_json }}
+              when: not clone_payload_template_stat.stat.exists
+
+            - name: Write fallback clone payload to /tmp (if built)
+              copy:
+                content: "{{ clone_payload_json }}"
+                dest: "/tmp/clone_payload_{{ inventory_hostname }}.json"
+                mode: '0644'
               when: not clone_payload_template_stat.stat.exists
 
             - name: Render clone payload template to /tmp
@@ -132,6 +145,7 @@
                 src: clone_payload.json.j2
                 dest: "/tmp/clone_payload_{{ inventory_hostname }}.json"
                 mode: '0644'
+              when: clone_payload_template_stat.stat.exists
 
             - name: Create cloned record (send rendered JSON) using uri
               uri:
@@ -226,9 +240,19 @@
             path: "{{ playbook_dir }}/templates/record_payload.json.j2"
           register: record_payload_template_stat
 
-        - name: Fail if record payload template missing (AWX project sync may be needed)
-          fail:
-            msg: "Template record_payload.json.j2 not found in project path {{ playbook_dir }}/templates. Please sync the AWX project or add the template file."
+        - name: Build fallback record payload JSON from variables (if template missing)
+          set_fact:
+            record_payload_json: >-
+              {{ ({ 'type': record_type, 'name': effective_record_name, 'content': record_value, 'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) } )
+                 | combine({'proxied': (global_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
+                 | to_json }}
+          when: not record_payload_template_stat.stat.exists
+
+        - name: Write fallback record payload to /tmp (if built)
+          copy:
+            content: "{{ record_payload_json }}"
+            dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
+            mode: '0644'
           when: not record_payload_template_stat.stat.exists
 
         - name: Render record payload template to /tmp
@@ -236,6 +260,7 @@
             src: record_payload.json.j2
             dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
             mode: '0644'
+          when: record_payload_template_stat.stat.exists
 
         - name: Debug runtime cf_validate_certs value
           debug:
