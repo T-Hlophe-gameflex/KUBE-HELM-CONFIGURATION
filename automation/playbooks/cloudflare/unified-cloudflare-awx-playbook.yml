@@ -106,9 +106,11 @@
                 return_content: true
                 validate_certs: false
               register: source_record_lookup
+
             - name: Set source_record fact
               set_fact:
                 source_record: "{{ source_record_lookup.json.result[0] if source_record_lookup.json.result|length > 0 else {} }}"
+
             - name: Create cloned record
               uri:
                 url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
@@ -126,6 +128,7 @@
                 return_content: true
                 validate_certs: false
               register: clone_result
+
             - name: Output clone operation result
               debug:
                 var: clone_result.json
