@@ -64,7 +64,8 @@
         - name: Set zone_id fact
           set_fact:
             zone_id: "{{ zone_lookup.json.result[0].id if zone_lookup.json.result|length > 0 else '' }}"
-        - name: Apply standard zone settings
+
+        - name: Apply standard zone settings (domain-level via uri)
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
             method: PATCH
@@ -73,7 +74,8 @@
               Content-Type: "application/json"
             body_format: json
             body:
-              value: "{{ item.value }}"
+              value: >-
+                {{ 'on' if (item.key == 'always_use_https' and (item.value | bool)) else ('off' if (item.key == 'always_use_https') else item.value) }}
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
@@ -710,7 +712,8 @@
                   Content-Type: "application/json"
                 body_format: json
                 body:
-                  value: "{{ item.value }}"
+                  value: >-
+                    {{ 'on' if (item.key == 'always_use_https' and (item.value | bool)) else ('off' if (item.key == 'always_use_https') else item.value) }}
                 return_content: true
                 validate_certs: "{{ cf_validate_certs | default(true) }}"
               loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
@@ -718,11 +721,14 @@
               when: not (cf_force_curl | default(false) | bool)
 
             - name: Apply standard zone settings (domain-level via curl fallback)
+              vars:
+                cf_setting_value: "{{ 'on' if (item.key == 'always_use_https' and (item.value | bool)) else ('off' if (item.key == 'always_use_https') else item.value) }}"
+                cf_zone_setting_payload: "{{ {'value': cf_setting_value} | to_json }}"
               shell: >-
                 curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X PATCH "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}" \
                   -H "Authorization: Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}" \
                   -H "Content-Type: application/json" \
-                  --data-binary '{{ {"value": item.value} | to_json }}'
+                  --data-binary '{{ cf_zone_setting_payload }}'
               args:
                 executable: /bin/bash
               loop: "{{ standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
