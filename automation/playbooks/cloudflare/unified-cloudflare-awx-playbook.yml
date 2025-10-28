@@ -778,7 +778,7 @@
               when: failed_zone_settings is defined and (failed_zone_settings | length) > 0
 
             - name: Retry failed zone settings with alternative values
-              include_tasks: tasks/retry_zone_setting.yml
+              include_tasks: "{{ playbook_dir | default('.') }}/tasks/retry_zone_setting.yml"
               loop: "{{ failed_zone_settings | default([]) }}"
               loop_control:
                 loop_var: failed_item
