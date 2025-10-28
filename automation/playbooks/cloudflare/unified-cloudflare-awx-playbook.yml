@@ -396,6 +396,7 @@
           when: cf_force_curl | default(false) | bool
 
         - name: Validate record JSON payload (python)
+          when: cf_action in ['create_record','update_record','clone_record']
           block:
             - name: Try to parse record payload
               command: >-
