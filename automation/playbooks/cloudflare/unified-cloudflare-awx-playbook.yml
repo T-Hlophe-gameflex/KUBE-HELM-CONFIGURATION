@@ -46,20 +46,28 @@
 
         - name: Build updated survey_spec with page_rule_selection choices
           set_fact:
-              awx_survey_spec: >-
-                {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
-                {% set questions = spec.spec | default([]) %}
-                {% set found = false %}
-                {% for q in questions %}
-                  {% if q.variable == 'page_rule_selection' %}
-                    {% set _ = q.update({'choices': page_rules_list}) %}
-                    {% set found = true %}
+                awx_survey_spec: >-
+                  {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+                  {% set questions = spec.spec | default([]) %}
+                  {% set found_page_rule = false %}
+                  {% set found_cf_action = false %}
+                  {% for q in questions %}
+                    {% if q.variable == 'page_rule_selection' %}
+                      {% set _ = q.update({'choices': page_rules_list}) %}
+                      {% set found_page_rule = true %}
+                    {% endif %}
+                    {% if q.variable == 'cf_action' %}
+                      {% set _ = q.update({'choices': ['create_record','update_record','delete_record','create_domain','clone_record'], 'default': 'create_record'}) %}
+                      {% set found_cf_action = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {% if not found_page_rule %}
+                    {% set _ = questions.append({'question_name': 'Page Rule Selection', 'question_description': 'Choose which named page rules to apply', 'required': True, 'type': 'multiplechoice', 'variable': 'page_rule_selection', 'choices': page_rules_list, 'default': 'all'}) %}
                   {% endif %}
-                {% endfor %}
-                {% if not found %}
-                  {% set _ = questions.append({'question_name': 'Page Rule Selection', 'question_description': 'Choose which named page rules to apply', 'required': True, 'type': 'multiplechoice', 'variable': 'page_rule_selection', 'choices': page_rules_list, 'default': 'all'}) %}
-                {% endif %}
-                {{ {'name': spec.name, 'spec': questions} }}
+                  {% if not found_cf_action %}
+                    {% set _ = questions.insert(0, {'question_name': 'What action do you want to perform?', 'required': True, 'type': 'multiplechoice', 'variable': 'cf_action', 'choices': ['create_record','update_record','delete_record','create_domain','clone_record'], 'default': 'create_record'}) %}
+                  {% endif %}
+                  {{ {'name': spec.name, 'spec': questions} }}
 
         - name: Patch AWX job template with updated survey_spec
           uri:
