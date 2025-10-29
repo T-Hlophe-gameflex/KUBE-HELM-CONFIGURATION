@@ -123,175 +123,30 @@
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: all_records_lookup
 
-        - name: Get page rules for this domain (if zone_id available)
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/pagerules"
-            method: GET
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: page_rules_lookup
-          when: 
-            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
-            - zone_id is defined and zone_id | length > 0
-            - selected_page_rule is defined and selected_page_rule != 'none'
-          ignore_errors: yes
-
-        - name: Normalize page rules lookup into simple facts
-          set_fact:
-            page_rules_count: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success %}{{ page_rules_lookup.json.result|length }}{% else %}0{% endif %}
-            page_rules_ids: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success %}{{ page_rules_lookup.json.result | map(attribute='id') | list | join(',') }}{% else %}''{% endif %}
-            page_rules_error_code: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].code }}{% else %}''{% endif %}
-            page_rules_error_msg: >-
-              {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].message }}{% else %}''{% endif %}
-          when: 
-            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
-            - zone_id is defined and zone_id | length > 0
-            - selected_page_rule is defined and selected_page_rule != 'none'
-            - page_rules_lookup is defined
-
-        - name: "[DOMAIN LEVEL] Page Rules API Warning"
-          debug:
-            msg: "[ERROR] Page Rules API error {{ page_rules_error_code }}: {{ page_rules_error_msg }}. Consider using zone-scoped token."
-          when:
-            - page_rules_error_code is defined
-            - page_rules_error_code | string == '1011'
-
-        - name: Enforce free-plan page rules limit (keep max 3 rules per zone)
-          block:
-            - name: Set page rules limit and existing rules list
-              set_fact:
-                page_rules_limit: "{{ page_rules_limit | default(3) }}"
-                existing_page_rules: >-
-                  {{ page_rules_lookup.json.result if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success) else [] }}
-                existing_count: >-
-                  {{ (page_rules_lookup.json.result | length) if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success) else 0 }}
-
-            - name: Compute excess count to delete
-              set_fact:
-                excess_to_delete: "{{ ((existing_count | int) - (page_rules_limit | int)) if ((existing_count | int) > (page_rules_limit | int)) else 0 }}"
-
-            # Page rules count computed - removed verbose debug
-
-            - name: Compute delete candidates (lowest priority) when excess exists
-              set_fact:
-                delete_candidates: >-
-                  {{ (existing_page_rules | sort(attribute='priority') | reverse | map(attribute='id') | list) if (excess_to_delete | int) > 0 else [] }}
-              when: excess_to_delete | int > 0
-
-            - name: Trim delete list to required count
-              set_fact:
-                delete_list: "{{ delete_candidates[0: (excess_to_delete | int) ] }}"
-              when: excess_to_delete | int > 0
-
-            - name: Delete excess page rules to enforce limit (only when not dry-run and apply enabled)
-              uri:
-                url: "{{ awx_api_url | default('https://api.cloudflare.com') | regex_replace('/$','') }}/client/v4/zones/{{ zone_id }}/pagerules/{{ item }}"
-                method: DELETE
-                headers:
-                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-                return_content: true
-                validate_certs: "{{ cf_validate_certs | default(true) }}"
-              loop: "{{ delete_list | default([]) }}"
-              loop_control:
-                label: "{{ item }}"
-              when: (excess_to_delete | int) > 0 and not (page_rules_dry_run | default(true)) and (apply_page_rules | default(true))
-              register: page_rules_delete_results
-
-            - name: Aggregate delete results into page_rules_apply_results
-              set_fact:
-                page_rules_apply_results: >-
-                  {{ (page_rules_apply_results | default([])) + [ { 'deleted_count': (page_rules_delete_results.results | default([]) | length) } ] }}
-              when: page_rules_delete_results is defined
-
-            - name: Recompute slots left to apply templates
-              set_fact:
-                page_rules_count: "{{ (existing_count - (delete_list | default([]) | length)) | int }}"
-                slots_left: "{{ (page_rules_limit | int) - (page_rules_count | int) if (page_rules_limit | int) - (page_rules_count | int) > 0 else 0 }}"
-          when: 
-            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
-            - zone_id is defined and zone_id | length > 0
-            - selected_page_rule is defined and selected_page_rule != 'none'
-            - page_rules_lookup is defined
-            - page_rules_lookup.json is defined
-            - page_rules_lookup.json.success | default(false)
-
-        # Page rules template preparation removed - legacy feature no longer used
-
         - name: Ensure record_id has a default (allow passing record_id directly)
           set_fact:
             record_id: "{{ record_id | default('') }}"
 
-        # DNS records list fetched - removed verbose debug output
-        # Records available in all_records_lookup.json.result for processing
-
-        # ========== REMOVED: Dropdown files and AWX survey update tasks ==========
-        # These tasks have been removed as they are no longer needed:
-        # - Build domains/records lists for dropdowns
-        # - Set default page rule templates
-        # - Write dropdown JSON files
-        # - Git commit/push dropdown files
-        # - PATCH AWX job template survey questions
-        # Use AWX UI or API directly for survey management if needed
-        # ==========================================================================
-
-        # ========== LEGACY PAGE RULES SECTION - DISABLED ==========
-        # This entire block is disabled - use modern Cloudflare Rules instead (rule_action field)
-        # - name: Apply page rule templates when none selected (safe mode)
-        #   when: cf_action in ['create_record','update_record'] and (selected_page_rule | default('')) == ''
-        #   block:
-        #     - name: Initialize page rules apply defaults (auto-apply by default)
-        #       set_fact:
-        #         page_rules_dry_run: "{{ page_rules_dry_run | default(false) }}"
-        #         apply_page_rules: "{{ apply_page_rules | default(true) }}"
-        #
-        #     - name: Log page rules that would be applied (dry-run flag shown)
-        #       debug:
-        #         msg: >-
-        #           PAGE_RULES_TO_APPLY | Domain={{ domain }} | Templates={{ page_rules_list | join(';') }} | ApplyFlag={{ apply_page_rules }} | DryRun={{ page_rules_dry_run }}
-        #
-        #     - name: Auto-apply page rule templates when dry-run disabled or apply_page_rules enabled
-        #       block:
-        #         - name: Ensure we have templates to apply
-        #           assert:
-        #             that:
-        #               - page_rules_templates is defined
-        #               - page_rules_templates | length > 0
-        #
-        #         - name: Iterate templates to apply and POST each to Cloudflare (or dry-run)
-        #           include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
-        #           loop: "{{ to_apply_templates | default(page_rules_templates) }}"
-        #           when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
-        #
-        #       rescue:
-        #         - name: Warn that page_rules application step failed
-        #           debug:
-        #             msg: >-
-        #               PAGE_RULES_APPLY_ERROR | Domain={{ domain }} | Error=Failed to iterate or POST page rules; check templates and token scopes
-        # ========== END LEGACY PAGE RULES SECTION ==========
-
-            # Page rules processed - removed verbose debug output
-
         # ========== Modern Cloudflare Rules Engine (Replaces Legacy Page Rules) ==========
         - name: Apply modern Cloudflare rules (Transform/Redirect/Configuration)
           when:
-            - cf_action in ['create_domain', 'create_record', 'update_record']
+            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
             - zone_id is defined and zone_id | length > 0
-            - rule_action is defined and rule_action != 'none'
           block:
+            - name: Set default rule_action to 'all' if not specified
+              set_fact:
+                rule_action: "{{ rule_action | default('all') }}"
+
             - name: Set rule actions list (expand 'all' to individual rules)
               set_fact:
-                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_everything', 'browser_cache_ttl'] if rule_action == 'all' else [rule_action] }}"
+                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_level', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if rule_action == 'all' else ([rule_action] if rule_action != 'none' else []) }}"
 
             - name: Apply each rule action
               include_tasks: "../tasks/apply_single_modern_rule.yml"
               loop: "{{ rule_actions_to_apply }}"
               loop_control:
                 loop_var: current_rule_action
+              when: rule_actions_to_apply | length > 0
 
         # ========== End of Modern Rules Section ==========
 
@@ -482,8 +337,6 @@
             numeric_ttl: >-
               {% if global_ttl is defined and (global_ttl is number or (global_ttl is string and global_ttl|int > 0)) %}{{ global_ttl|int }}{% else %}3600{% endif %}
 
-        # TTL computed - removed verbose debug
-
         - name: Determine effective proxied flag (record-level overrides)
           set_fact:
             effective_proxied: >-
@@ -526,8 +379,6 @@
             mode: '0644'
           when: record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
 
-        # cf_validate_certs runtime value - removed verbose debug
-
         - name: Preview rendered record payload (first 200 chars)
           shell: >-
             if [ -f /tmp/record_payload_{{ inventory_hostname }}.json ]; then
@@ -538,8 +389,6 @@
           register: record_payload_preview
           changed_when: false
           ignore_errors: true
-
-        # Record payload rendered - removed verbose preview
 
         - name: Create or update record (send rendered JSON) — attempt uri first (may fail)
           # tolerate failures here so we can fallback to curl and capture Cloudflare's raw response
@@ -579,8 +428,6 @@
           set_fact:
             record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
           when: record_curl_result is defined and record_curl_result.stdout is defined
-
-        # Cloudflare response processing - removed verbose debug
 
         - name: Build normalized CF record response object for idempotency checks
           set_fact:
@@ -692,13 +539,12 @@
           args:
             executable: /bin/bash
           register: record_curl_result
+
         - name: Debug record curl result
           when: debug_curl | default(false)
           debug:
             var: record_curl_result.stdout
 
-        # debug payload task removed to avoid YAML parsing issues
-        
         - name: Delete record
           when: cf_action == 'delete_record' and record_id
           uri:
@@ -744,15 +590,13 @@
           loop_control:
             loop_var: zone
 
-    # Global settings output removed - tracked in global_changes array
-
     - name: Output domain settings summary (structured)
       when: domain is defined and domain|length > 0
       block:
         - name: "[DOMAIN LEVEL] Zone Configuration"
           debug:
             msg: >-
-              Domain: {{ domain }} | Zone ID: {{ zone_id | default('N/A') }} | Page Rules: {{ page_rules_count | default(0) }}{% if page_rules_error_code | default('') != '' %} | Note: Error {{ page_rules_error_code }}{% endif %}
+              Domain: {{ domain }} | Zone ID: {{ zone_id | default('N/A') }} | Modern Rules: {{ rule_actions_to_apply | default([]) | length }}
 
         - name: Domain zone setting - {{ item.item.key }}
           debug:

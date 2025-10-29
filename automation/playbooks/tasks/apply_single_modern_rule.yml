@@ -15,7 +15,8 @@
   set_fact:
     ruleset_phase: >-
       {% if current_rule_action in ['force_https', 'redirect_to_www', 'redirect_from_www'] %}http_request_dynamic_redirect
-      {% elif current_rule_action in ['cache_everything', 'browser_cache_ttl'] %}http_request_cache_settings
+      {% elif current_rule_action in ['cache_everything', 'browser_cache_ttl', 'cache_level', 'edge_cache_ttl'] %}http_request_cache_settings
+      {% elif current_rule_action == 'argo_smart_routing' %}http_request_transform
       {% else %}http_request_transform{% endif %}
 
 - name: Get existing rulesets for this zone

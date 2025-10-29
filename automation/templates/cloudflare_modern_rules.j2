@@ -52,6 +52,43 @@
   "enabled": true
 }
 
+{% elif rule_action == 'cache_level' %}
+{
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "cache": false,
+    "cache_level": "bypass"
+  },
+  "expression": "(http.host eq \"{{ domain }}\")",
+  "description": "Set cache level to bypass for {{ domain }}",
+  "enabled": true
+}
+
+{% elif rule_action == 'edge_cache_ttl' %}
+{
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "edge_ttl": {
+      "mode": "override_origin",
+      "default": {{ edge_ttl_value | default(7200) }}
+    }
+  },
+  "expression": "(http.host eq \"{{ domain }}\")",
+  "description": "Set Edge Cache TTL to {{ edge_ttl_value | default(7200) }} seconds for {{ domain }}",
+  "enabled": true
+}
+
+{% elif rule_action == 'argo_smart_routing' %}
+{
+  "action": "set_config",
+  "action_parameters": {
+    "argo_smart_routing": "on"
+  },
+  "expression": "(http.host eq \"{{ domain }}\")",
+  "description": "Enable Argo Smart Routing for {{ domain }}",
+  "enabled": true
+}
+
 {% elif rule_action == 'cache_everything' %}
 {
   "action": "set_cache_settings",
