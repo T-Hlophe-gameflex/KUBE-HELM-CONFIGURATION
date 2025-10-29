@@ -87,7 +87,7 @@ get_awx_token() {
 #===============================================================================
 
 fetch_cloudflare_domains() {
-    info "Fetching Cloudflare domains..."
+    info "Fetching Cloudflare domains..." >&2
     
     if [[ -z "$CLOUDFLARE_API_TOKEN" ]]; then
         error_exit "CLOUDFLARE_API_TOKEN environment variable not set"
@@ -108,6 +108,7 @@ fetch_cloudflare_domains() {
 
 fetch_cloudflare_records() {
     local zone_id="$1"
+    local zone_name="$2"
     
     local response
     response=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
@@ -120,25 +121,33 @@ fetch_cloudflare_records() {
         return
     fi
     
-    # Extract record names
-    echo "$response" | jq -r '[.result[] | .name] | sort | unique'
+    # Extract record names and strip domain suffix to get only subdomain/record name
+    # Example: "www.example.com" with zone "example.com" → "www"
+    # Example: "example.com" (apex) → "@" (root)
+    echo "$response" | jq -r --arg zone "$zone_name" '
+        [.result[] | 
+            if .name == $zone then "@"
+            else .name | sub("\\." + ($zone | @text) + "$"; "")
+            end
+        ] | sort | unique'
 }
 
 fetch_all_records_from_all_zones() {
-    info "Fetching all DNS records from all zones..."
+    info "Fetching all DNS records from all zones..." >&2
     
-    local zones
-    zones=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones" \
+    local zones_data
+    zones_data=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones" \
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-        -H "Content-Type: application/json" | jq -r '.result[] | .id')
+        -H "Content-Type: application/json" | jq -r '.result[] | "\(.id)|\(.name)"')
     
     local all_records="[]"
     
-    for zone_id in $zones; do
+    while IFS='|' read -r zone_id zone_name; do
+        [ -z "$zone_id" ] && continue
         local records
-        records=$(fetch_cloudflare_records "$zone_id")
+        records=$(fetch_cloudflare_records "$zone_id" "$zone_name")
         all_records=$(echo "$all_records" | jq --argjson new "$records" '. + $new | sort | unique')
-    done
+    done <<< "$zones_data"
     
     echo "$all_records"
 }
@@ -152,7 +161,7 @@ update_awx_survey() {
     local field_name="$2"
     local choices="$3"  # JSON array
     
-    info "Updating AWX survey field: $field_name"
+    info "Updating AWX survey field: $field_name" >&2
     
     # Get current survey spec
     local awx_password
