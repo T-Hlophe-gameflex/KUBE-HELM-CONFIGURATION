@@ -1,59 +1,110 @@
 ---
-- name: Determine which page rules to apply
+# Page rules tasks for unified playbook (single clean version)
+
+- name: Normalize page_rule_selection into a list
   set_fact:
-    selected_page_rules: >-
-      {% if page_rule_selection == 'all' %}
-        {{ available_page_rules }}
+    page_rule_selection_list: >-
+      {% if page_rule_selection is string %}
+        {{ page_rule_selection.split(',') | map('trim') | list }}
       {% else %}
-        {{ available_page_rules | selectattr('name', 'equalto', page_rule_selection) | list }}
+        {{ page_rule_selection | default(['all']) }}
       {% endif %}
 
-- name: Optionally fetch page rules from another domain
-  when: source_domain_for_rules is defined and source_domain_for_rules|length > 0
+- name: Build selected_page_rules from available_page_rules (or use 'all')
+  set_fact:
+    selected_page_rules: >-
+      {% if 'all' in (page_rule_selection_list | default(['all'])) %}
+        {{ available_page_rules | default([]) }}
+      {% else %}
+        {% set out = [] %}
+        {% for r in available_page_rules | default([]) %}
+          {% if r.name in page_rule_selection_list %}
+            {% set _ = out.append(r) %}
+          {% endif %}
+        {% endfor %}
+        {{ out }}
+      {% endif %}
+
+- name: Optionally fetch page rules from a source domain
+  when: source_domain_for_rules is defined and source_domain_for_rules | length > 0
   block:
-    - name: Get zone ID for source domain
+    - name: Lookup source zone_id
       uri:
         url: "https://api.cloudflare.com/client/v4/zones?name={{ source_domain_for_rules }}"
         method: GET
         headers:
           Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          Content-Type: "application/json"
         return_content: true
-        validate_certs: false
+        validate_certs: "{{ cf_validate_certs | default(true) }}"
       register: source_zone_lookup
 
-    - name: Get page rules from source domain
+    - name: Get page rules from source zone
       uri:
         url: "https://api.cloudflare.com/client/v4/zones/{{ source_zone_lookup.json.result[0].id }}/pagerules"
         method: GET
         headers:
           Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          Content-Type: "application/json"
         return_content: true
-        validate_certs: false
+        validate_certs: "{{ cf_validate_certs | default(true) }}"
       register: source_page_rules_lookup
 
-    - name: Set selected_page_rules from source domain
+    - name: Override selected_page_rules with source rules
       set_fact:
         selected_page_rules: "{{ source_page_rules_lookup.json.result }}"
 
-- name: Get zone ID for target domain
+- name: Ensure we have target zone lookup (if needed)
   uri:
     url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
     method: GET
     headers:
       Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-      Content-Type: "application/json"
     return_content: true
-    validate_certs: false
+    validate_certs: "{{ cf_validate_certs | default(true) }}"
   register: target_zone_lookup
 
+- name: Render url_template placeholders in selected_page_rules actions
+  set_fact:
+    selected_page_rules: >-
+      {% set out = [] %}
+      {% for r in selected_page_rules | default([]) %}
+        {% set new_actions = [] %}
+        {% if r.actions is defined %}
+          {% for a in r.actions %}
+            {% set new_a = (a if a is mapping else a) %}
+            {% if new_a.value is defined and new_a.value.url_template is defined %}
+              {% set new_value = {'url': (new_a.value.url_template | replace('{domain}', domain))} %}
+              {% if new_a.value.status_code is defined %}
+                {% set _ = new_value.update({'status_code': new_a.value.status_code}) %}
+              {% endif %}
+              {% set _ = new_a.update({'value': new_value}) %}
+            {% endif %}
+            {% set _ = new_actions.append(new_a) %}
+          {% endfor %}
+        {% endif %}
+        {% set new_rule = (r if r is mapping else r) %}
+        {% set _ = new_rule.update({'actions': new_actions}) %}
+        {% set _ = out.append(new_rule) %}
+      {% endfor %}
+      {{ out }}
+
+- name: Resolve target_zone_id (prefer provided zone_id)
+  set_fact:
+    target_zone_id: >-
+      {% if zone_id is defined and zone_id | length > 0 %}
+        {{ zone_id }}
+      {% elif (target_zone_lookup is defined and target_zone_lookup.json is defined and target_zone_lookup.json.result | length > 0) %}
+        {{ target_zone_lookup.json.result[0].id }}
+      {% else %}
+        ''
+      {% endif %}
+
 - name: Apply selected page rules to target domain
-  loop: "{{ selected_page_rules }}"
+  when: target_zone_id is defined and target_zone_id | length > 0 and (selected_page_rules | default([])) | length > 0
+  loop: "{{ selected_page_rules | default([]) }}"
   loop_control:
     label: "{{ item.name | default('unnamed rule') }}"
   uri:
-    url: "https://api.cloudflare.com/client/v4/zones/{{ target_zone_lookup.json.result[0].id }}/pagerules"
+    url: "https://api.cloudflare.com/client/v4/zones/{{ target_zone_id }}/pagerules"
     method: POST
     headers:
       Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
@@ -68,7 +119,7 @@
       actions: "{{ item.actions }}"
       status: "active"
     return_content: true
-    validate_certs: false
+    validate_certs: "{{ cf_validate_certs | default(true) }}"
   register: page_rule_apply_result
 
 - name: Output page rule application result
