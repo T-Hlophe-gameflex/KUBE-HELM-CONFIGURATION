@@ -445,38 +445,41 @@
             - name: Warn AWX survey update failed
               debug:
                 msg: "AWX survey update failed or was not possible; check AWX API settings or token"
-        - name: Apply page rule templates when none selected (safe mode)
-          when: cf_action in ['create_record','update_record'] and (selected_page_rule | default('')) == ''
-          block:
-            - name: Initialize page rules apply defaults (auto-apply by default)
-              set_fact:
-                page_rules_dry_run: "{{ page_rules_dry_run | default(false) }}"
-                apply_page_rules: "{{ apply_page_rules | default(true) }}"
 
-            - name: Log page rules that would be applied (dry-run flag shown)
-              debug:
-                msg: >-
-                  PAGE_RULES_TO_APPLY | Domain={{ domain }} | Templates={{ page_rules_list | join(';') }} | ApplyFlag={{ apply_page_rules }} | DryRun={{ page_rules_dry_run }}
-
-            - name: Auto-apply page rule templates when dry-run disabled or apply_page_rules enabled
-              block:
-                - name: Ensure we have templates to apply
-                  assert:
-                    that:
-                      - page_rules_templates is defined
-                      - page_rules_templates | length > 0
-
-                # Legacy page rules - disabled (use modern rules instead)
-                # - name: Iterate templates to apply and POST each to Cloudflare (or dry-run)
-                #   include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
-                #   loop: "{{ to_apply_templates | default(page_rules_templates) }}"
-                #   when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
-
-              rescue:
-                - name: Warn that page_rules application step failed
-                  debug:
-                    msg: >-
-                      PAGE_RULES_APPLY_ERROR | Domain={{ domain }} | Error=Failed to iterate or POST page rules; check templates and token scopes
+        # ========== LEGACY PAGE RULES SECTION - DISABLED ==========
+        # This entire block is disabled - use modern Cloudflare Rules instead (rule_action field)
+        # - name: Apply page rule templates when none selected (safe mode)
+        #   when: cf_action in ['create_record','update_record'] and (selected_page_rule | default('')) == ''
+        #   block:
+        #     - name: Initialize page rules apply defaults (auto-apply by default)
+        #       set_fact:
+        #         page_rules_dry_run: "{{ page_rules_dry_run | default(false) }}"
+        #         apply_page_rules: "{{ apply_page_rules | default(true) }}"
+        #
+        #     - name: Log page rules that would be applied (dry-run flag shown)
+        #       debug:
+        #         msg: >-
+        #           PAGE_RULES_TO_APPLY | Domain={{ domain }} | Templates={{ page_rules_list | join(';') }} | ApplyFlag={{ apply_page_rules }} | DryRun={{ page_rules_dry_run }}
+        #
+        #     - name: Auto-apply page rule templates when dry-run disabled or apply_page_rules enabled
+        #       block:
+        #         - name: Ensure we have templates to apply
+        #           assert:
+        #             that:
+        #               - page_rules_templates is defined
+        #               - page_rules_templates | length > 0
+        #
+        #         - name: Iterate templates to apply and POST each to Cloudflare (or dry-run)
+        #           include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
+        #           loop: "{{ to_apply_templates | default(page_rules_templates) }}"
+        #           when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
+        #
+        #       rescue:
+        #         - name: Warn that page_rules application step failed
+        #           debug:
+        #             msg: >-
+        #               PAGE_RULES_APPLY_ERROR | Domain={{ domain }} | Error=Failed to iterate or POST page rules; check templates and token scopes
+        # ========== END LEGACY PAGE RULES SECTION ==========
 
             - name: Debug page rules apply results
               debug:
