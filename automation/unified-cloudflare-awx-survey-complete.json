@@ -1,0 +1,171 @@
+{
+  "name": "Cloudflare DNS Management Survey",
+  "description": "Comprehensive survey for managing Cloudflare DNS records and settings",
+  "spec": [
+    {
+      "question_name": "Action",
+      "question_description": "Select the action to perform",
+      "variable": "cf_action",
+      "type": "multiplechoice",
+      "required": true,
+      "default": "create_record",
+      "choices": [
+        "create_domain",
+        "create_record",
+        "update_record",
+        "delete_record",
+        "clone_record",
+        "standardize",
+        "sync"
+      ]
+    },
+    {
+      "question_name": "Domain",
+      "question_description": "Enter the domain name (e.g., example.com)",
+      "variable": "domain",
+      "type": "text",
+      "required": true,
+      "default": ""
+    },
+    {
+      "question_name": "Record Type",
+      "question_description": "Select DNS record type",
+      "variable": "record_type",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "A",
+      "choices": [
+        "A",
+        "AAAA",
+        "CNAME",
+        "MX",
+        "TXT",
+        "SRV",
+        "CAA",
+        "NS"
+      ]
+    },
+    {
+      "question_name": "Record Name",
+      "question_description": "Enter the record name (e.g., www, @, subdomain)",
+      "variable": "record_name",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "question_name": "Record Value",
+      "question_description": "Enter the record value (IP address, hostname, or text)",
+      "variable": "record_value",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "question_name": "TTL (seconds)",
+      "question_description": "Time to live in seconds (1 = auto, 120-86400)",
+      "variable": "global_ttl",
+      "type": "integer",
+      "required": false,
+      "default": "3600",
+      "min": 1,
+      "max": 86400
+    },
+    {
+      "question_name": "Proxied",
+      "question_description": "Enable Cloudflare proxy (orange cloud)",
+      "variable": "global_proxied",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "false",
+      "choices": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "question_name": "Record ID",
+      "question_description": "Existing record ID (for update/delete, leave empty for auto-lookup)",
+      "variable": "record_id",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "question_name": "Clone Record Name",
+      "question_description": "New name for cloned record",
+      "variable": "clone_record_name",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "question_name": "Selected Record Name",
+      "question_description": "Select from existing records (alternative to typing)",
+      "variable": "selected_record_name",
+      "type": "text",
+      "required": false,
+      "default": ""
+    },
+    {
+      "question_name": "Update AWX Surveys",
+      "question_description": "Update AWX survey dropdowns with fetched data",
+      "variable": "update_awx_surveys",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "false",
+      "choices": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "question_name": "Debug CURL",
+      "question_description": "Show detailed curl debug output",
+      "variable": "debug_curl",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "false",
+      "choices": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "question_name": "Force CURL",
+      "question_description": "Force use of curl instead of uri module",
+      "variable": "cf_force_curl",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "false",
+      "choices": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "question_name": "Page Rules Dry Run",
+      "question_description": "Preview page rules without applying",
+      "variable": "page_rules_dry_run",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "true",
+      "choices": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "question_name": "Apply Page Rules",
+      "question_description": "Apply page rules templates",
+      "variable": "apply_page_rules",
+      "type": "multiplechoice",
+      "required": false,
+      "default": "false",
+      "choices": [
+        "true",
+        "false"
+      ]
+    }
+  ]
+}

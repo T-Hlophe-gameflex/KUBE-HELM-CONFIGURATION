@@ -106,7 +106,10 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: page_rules_lookup
-          when: zone_id is defined and zone_id | length > 0
+          when: 
+            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
+            - zone_id is defined and zone_id | length > 0
+            - selected_page_rule is defined and selected_page_rule != 'none'
           ignore_errors: yes
 
         - name: Normalize page rules lookup into simple facts
@@ -119,7 +122,18 @@
               {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].code }}{% else %}''{% endif %}
             page_rules_error_msg: >-
               {% if page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.errors | length > 0 %}{{ page_rules_lookup.json.errors[0].message }}{% else %}''{% endif %}
-          when: zone_id is defined and zone_id | length > 0
+          when: 
+            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
+            - zone_id is defined and zone_id | length > 0
+            - selected_page_rule is defined and selected_page_rule != 'none'
+            - page_rules_lookup is defined
+
+        - name: Display page rules API warning if applicable
+          debug:
+            msg: "WARNING: Page Rules API returned error code {{ page_rules_error_code }}: {{ page_rules_error_msg }}. Skipping page rules management. Consider using a zone-scoped token instead of account token."
+          when:
+            - page_rules_error_code is defined
+            - page_rules_error_code | string == '1011'
 
         - name: Enforce free-plan page rules limit (keep max 3 rules per zone)
           block:
@@ -128,11 +142,12 @@
                 page_rules_limit: "{{ page_rules_limit | default(3) }}"
                 existing_page_rules: >-
                   {{ page_rules_lookup.json.result if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success) else [] }}
+                existing_count: >-
+                  {{ (page_rules_lookup.json.result | length) if (page_rules_lookup is defined and page_rules_lookup.json is defined and page_rules_lookup.json.success) else 0 }}
 
             - name: Compute excess count to delete
               set_fact:
-                existing_count: "{{ existing_page_rules | length }}"
-                excess_to_delete: "{{ (existing_count - (page_rules_limit | int)) if (existing_count | int) > (page_rules_limit | int) else 0 }}"
+                excess_to_delete: "{{ ((existing_count | int) - (page_rules_limit | int)) if ((existing_count | int) > (page_rules_limit | int)) else 0 }}"
 
             - name: Debug page rules counts
               debug:
@@ -173,16 +188,46 @@
               set_fact:
                 page_rules_count: "{{ (existing_count - (delete_list | default([]) | length)) | int }}"
                 slots_left: "{{ (page_rules_limit | int) - (page_rules_count | int) if (page_rules_limit | int) - (page_rules_count | int) > 0 else 0 }}"
-          when: zone_id is defined and zone_id | length > 0
+          when: 
+            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
+            - zone_id is defined and zone_id | length > 0
+            - selected_page_rule is defined and selected_page_rule != 'none'
+            - page_rules_lookup is defined
+            - page_rules_lookup.json is defined
+            - page_rules_lookup.json.success | default(false)
 
         - name: Prepare templates to apply respecting free-plan limit
           set_fact:
             to_apply_templates: >-
               {{ (page_rules_templates[0:slots_left] if (page_rules_templates is defined and slots_left | int > 0) else []) }}
-          when: page_rules_templates is defined
+          when: 
+            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
+            - page_rules_templates is defined
+            - selected_page_rule is defined and selected_page_rule != 'none'
         - name: Ensure record_id has a default (allow passing record_id directly)
           set_fact:
             record_id: "{{ record_id | default('') }}"
+        - name: Display current DNS records for this domain
+          debug:
+            msg: |
+              ================================================================================
+              CURRENT DNS RECORDS FOR: {{ domain }}
+              ================================================================================
+              {% set records = all_records_lookup.json.result if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined) else [] %}
+              {% if records | length > 0 %}
+              Total Records: {{ records | length }}
+              {% for r in records %}
+              {{ loop.index }}. {{ r.name }} ({{ r.type }})
+                 Content: {{ r.content }}
+                 TTL: {{ r.ttl }} | Proxied: {{ r.proxied | default(false) }}
+                 Record ID: {{ r.id }}
+              {% endfor %}
+              {% else %}
+              No DNS records found for this domain.
+              {% endif %}
+              ================================================================================
+          when: all_records_lookup is defined and all_records_lookup.json is defined
+
         - name: Output all DNS records for this domain (debug)
           # Show a concise list: name (type) -> content
           debug:
@@ -192,7 +237,9 @@
                 {% set _ = rows.append(r.name ~ ' (' ~ r.type ~ '): ' ~ (r.content | string)) %}
               {% endfor %}
               {{ rows }}
-          when: all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined
+          when: 
+            - all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result is defined
+            - debug_curl | default(false)
 
         - name: No DNS records fetched (debug fallback)
           debug:
