@@ -87,7 +87,7 @@
       "true",
       "false"
     ],
-    "default": "false"
+    "default": "true"
   },
   {
     "question_name": "Cloudflare Rule Action",
