@@ -41,7 +41,7 @@ fi
 PLAYBOOK_PATH_PREFIX="automation/"
 
 # Unified template mapping
-TEMPLATE_NAME="unified-cloudflare-awx-template"
+TEMPLATE_NAME="Cloudflare Main Templete"
 PLAYBOOK_FILE="unified-cloudflare-awx-playbook.yml"
 
 # Check if template exists
@@ -49,32 +49,12 @@ EXIST=$(awx_get "/api/v2/job_templates/?name=$TEMPLATE_NAME" | python3 -c 'impor
 if [ "$EXIST" -gt 0 ]; then
   echo "Job template '$TEMPLATE_NAME' already exists. Will PATCH to ensure settings are up-to-date."
   ID=$(awx_get "/api/v2/job_templates/?name=$TEMPLATE_NAME" | python3 -c 'import sys,json;j=json.load(sys.stdin);print(j["results"][0]["id"])')
-def merge_specs(e, n):
-  existing_vars = {q["variable"] for q in e.get("spec", [])}
-  merged = e.get("spec", []) + [q for q in n if q["variable"] not in existing_vars]
-  return {"name": "Survey", "spec": merged}
-print(json.dumps(merge_specs(e, n)))' "$EXISTING_SPEC" "$NEW_SPEC")
   if [ "$DRY_RUN" = false ]; then
     PATCH_PAYLOAD=$(printf '{"project":%d, "playbook":"%s", "credential":%d}' "$PROJECT_ID" "${PLAYBOOK_PATH_PREFIX}$PLAYBOOK_FILE" "$CRED_ID")
     curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X PATCH "$AWX_HOST/api/v2/job_templates/$ID/" -d "$PATCH_PAYLOAD" >/dev/null || true
     echo "Patched existing job_template $ID"
-    # Add survey fields from JSON (preferred) or YAML
-    SURVEY_JSON="${PLAYBOOK_PATH_PREFIX}unified-cloudflare-awx-survey.json"
-    SURVEY_YML="${PLAYBOOK_PATH_PREFIX}cloudflare/unified-cloudflare-awx-survey.yml"
-    if [ -f "$SURVEY_JSON" ]; then
-      NEW_SPEC=$(python3 -c 'import sys,json; print(json.dumps({"name": "Survey", "spec": json.load(sys.stdin)}))' < "$SURVEY_JSON")
-      curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X PATCH "$AWX_HOST/api/v2/job_templates/$ID/" -d "{\"survey_enabled\": true, \"survey_spec\": $NEW_SPEC}" >/dev/null || true
-      echo "Patched job_template $ID with survey fields from unified-cloudflare-awx-survey.json"
-    elif [ -f "$SURVEY_YML" ]; then
-      NEW_SPEC=$(python3 -c 'import sys,yaml,json; print(json.dumps({"name": "Survey", "spec": yaml.safe_load(sys.stdin)}))' < "$SURVEY_YML")
-      curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X PATCH "$AWX_HOST/api/v2/job_templates/$ID/" -d "{\"survey_enabled\": true, \"survey_spec\": $NEW_SPEC}" >/dev/null || true
-      echo "Patched job_template $ID with survey fields from unified-cloudflare-awx-survey.yml"
-    fi
-    # Rename job template to 'Cloudflare Main Templete'
-    curl -s -H "Authorization: Bearer $AWX_TOKEN" -H "Content-Type: application/json" -X PATCH "$AWX_HOST/api/v2/job_templates/$ID/" -d '{"name": "Cloudflare Main Templete"}' >/dev/null || true
-    echo "Renamed job template $ID to 'Cloudflare Main Templete'"
   else
-    echo "DRY-RUN: would PATCH job_template $ID with playbook ${PLAYBOOK_PATH_PREFIX}$PLAYBOOK_FILE, survey fields, and rename"
+    echo "DRY-RUN: would PATCH job_template $ID with playbook ${PLAYBOOK_PATH_PREFIX}$PLAYBOOK_FILE"
   fi
 else
   echo "Creating job template '$TEMPLATE_NAME'..."
