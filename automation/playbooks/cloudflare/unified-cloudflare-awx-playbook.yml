@@ -73,7 +73,7 @@
               {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
         - name: Merge zone settings with survey values
           set_fact:
-            merged_zone_settings: "{{ standard_zone_settings | default({}) | combine({'ssl_recommender': (ssl_tls_recommender | default('enabled'))}) }}"
+            merged_zone_settings: "{{ standard_zone_settings | default({}) | combine({'ssl_recommender': (ssl_tls_recommender | default('enabled')), 'cache_level': (cache_level_mode | default('standard'))}) }}"
 
         - name: Apply standard zone settings
           uri:
@@ -99,7 +99,7 @@
             msg:
               - "Standard zone settings configured"
               - "  Domain: {{ domain }}"
-              - "  Settings: always_use_https, min_tls_version=1.2, cache_level, ssl_recommender={{ ssl_tls_recommender | default('enabled') }}"
+              - "  Settings: always_use_https, min_tls_version=1.2, cache_level={{ cache_level_mode | default('standard') }}, ssl_recommender={{ ssl_tls_recommender | default('enabled') }}"
 
     - name: Manage DNS record (create/update/delete)
       when: cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
@@ -143,7 +143,7 @@
 
             - name: Set rule actions list (expand 'all' to individual rules)
               set_fact:
-                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_level', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if survey_rule_action == 'all' else ([survey_rule_action] if survey_rule_action != 'none' else []) }}"
+                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if survey_rule_action == 'all' else ([survey_rule_action] if survey_rule_action != 'none' else []) }}"
 
             - name: Apply each rule action
               include_tasks: "../tasks/apply_single_modern_rule.yml"
