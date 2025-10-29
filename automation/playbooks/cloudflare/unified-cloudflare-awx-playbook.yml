@@ -466,10 +466,11 @@
                       - page_rules_templates is defined
                       - page_rules_templates | length > 0
 
-                - name: Iterate templates to apply and POST each to Cloudflare (or dry-run)
-                  include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
-                  loop: "{{ to_apply_templates | default(page_rules_templates) }}"
-                  when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
+                # Legacy page rules - disabled (use modern rules instead)
+                # - name: Iterate templates to apply and POST each to Cloudflare (or dry-run)
+                #   include_tasks: "{{ playbook_dir }}/tasks/apply_page_rule.yml"
+                #   loop: "{{ to_apply_templates | default(page_rules_templates) }}"
+                #   when: (page_rules_dry_run | default(true)) == false or (apply_page_rules | default(false)) == true
 
               rescue:
                 - name: Warn that page_rules application step failed
@@ -491,7 +492,7 @@
           block:
             - name: Generate rule configuration from template
               set_fact:
-                rule_payload: "{{ lookup('template', '../templates/cloudflare_modern_rules.j2') | from_json }}"
+                rule_payload: "{{ lookup('template', '../../templates/cloudflare_modern_rules.j2') | from_json }}"
 
             - name: Determine appropriate ruleset phase based on rule action
               set_fact:
