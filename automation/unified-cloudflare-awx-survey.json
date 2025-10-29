@@ -1,1 +1,83 @@
-// This file is no longer used. Survey spec is now built dynamically in the playbook using in-memory variables and facts.
+[
+  {
+    "question_name": "Cloudflare Action",
+    "question_description": "Select the action to perform in Cloudflare",
+    "required": true,
+    "type": "multiplechoice",
+    "variable": "cf_action",
+    "choices": [
+      "create_domain",
+      "create_record",
+      "update_record",
+      "delete_record",
+      "clone_record",
+      "standardize",
+      "sync"
+    ],
+    "default": "create_record"
+  },
+  {
+    "question_name": "Domain Name",
+    "question_description": "Enter the domain name to manage (e.g., example.com)",
+    "required": true,
+    "type": "text",
+    "variable": "domain",
+    "default": ""
+  },
+  {
+    "question_name": "Record Name",
+    "question_description": "DNS record name (e.g., www, api, or @ for root)",
+    "required": false,
+    "type": "text",
+    "variable": "record_name",
+    "default": ""
+  },
+  {
+    "question_name": "Record Type",
+    "question_description": "Select the DNS record type",
+    "required": false,
+    "type": "multiplechoice",
+    "variable": "record_type",
+    "choices": [
+      "A",
+      "AAAA",
+      "CNAME",
+      "TXT",
+      "MX",
+      "SRV",
+      "NS",
+      "CAA"
+    ],
+    "default": "A"
+  },
+  {
+    "question_name": "Record Content/Value",
+    "question_description": "DNS record content (IP address, target hostname, or text value)",
+    "required": false,
+    "type": "text",
+    "variable": "record_value",
+    "default": ""
+  },
+  {
+    "question_name": "Record TTL",
+    "question_description": "Time to Live in seconds (1 = automatic, 3600 = 1 hour)",
+    "required": false,
+    "type": "integer",
+    "variable": "global_ttl",
+    "default": "3600",
+    "min": 1,
+    "max": 2147483647
+  },
+  {
+    "question_name": "Proxy Status",
+    "question_description": "Enable Cloudflare proxy (orange cloud) - only for A, AAAA, CNAME records",
+    "required": false,
+    "type": "multiplechoice",
+    "variable": "global_proxied",
+    "choices": [
+      "true",
+      "false"
+    ],
+    "default": "false"
+  }
+]
