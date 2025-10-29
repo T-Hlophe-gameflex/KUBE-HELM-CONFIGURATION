@@ -31,7 +31,7 @@
       block:
         - name: Build page_rules_list for survey
           set_fact:
-            page_rules_list: "{{ (available_page_rules | map(attribute='name') | list) + ['all'] }}"
+              page_rules_list: "{{ (available_page_rules | map(attribute='name') | list) + ['all'] }}"
 
         - name: Get current AWX job template
           uri:
@@ -46,20 +46,20 @@
 
         - name: Build updated survey_spec with page_rule_selection choices
           set_fact:
-            awx_survey_spec: >-
-              {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
-              {% set questions = spec.spec | default([]) %}
-              {% set found = false %}
-              {% for q in questions %}
-                {% if q.variable == 'page_rule_selection' %}
-                  {% set _ = q.update({'choices': (page_rules_list | join(','))}) %}
-                  {% set found = true %}
+              awx_survey_spec: >-
+                {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+                {% set questions = spec.spec | default([]) %}
+                {% set found = false %}
+                {% for q in questions %}
+                  {% if q.variable == 'page_rule_selection' %}
+                    {% set _ = q.update({'choices': page_rules_list}) %}
+                    {% set found = true %}
+                  {% endif %}
+                {% endfor %}
+                {% if not found %}
+                  {% set _ = questions.append({'question_name': 'Page Rule Selection', 'question_description': 'Choose which named page rules to apply', 'required': True, 'type': 'multiplechoice', 'variable': 'page_rule_selection', 'choices': page_rules_list, 'default': 'all'}) %}
                 {% endif %}
-              {% endfor %}
-              {% if not found %}
-                {% set _ = questions.append({'question_name': 'Page Rule Selection', 'question_description': 'Choose which named page rules to apply', 'required': True, 'type': 'multiplechoice', 'variable': 'page_rule_selection', 'choices': (page_rules_list | join(',')), 'default': 'all'}) %}
-              {% endif %}
-              {{ {'name': spec.name, 'spec': questions} }}
+                {{ {'name': spec.name, 'spec': questions} }}
 
         - name: Patch AWX job template with updated survey_spec
           uri:

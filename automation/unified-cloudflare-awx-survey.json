@@ -46,5 +46,13 @@
     "choices": ["true", "false"],
     "required": true,
     "default": "true"
+  },
+  {
+    "variable": "page_rule_selection",
+    "type": "multiplechoice",
+    "question_name": "Page Rule Selection",
+    "choices": ["Browser TTL", "Always Use HTTPS", "all"],
+    "required": true,
+    "default": "all"
   }
 ]
