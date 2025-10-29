@@ -1,0 +1,34 @@
+name: Unified Cloudflare Survey
+description: Survey for Cloudflare job template
+spec:
+  - question_name: "Domain Name"
+    question_description: "Enter the domain name to manage"
+    required: true
+    type: text
+    variable: domain
+    default: ""
+
+  - question_name: "Record Type"
+    question_description: "Select the DNS record type"
+    required: true
+    type: multiplechoice
+    variable: record_type
+    choices:
+      - "A"
+      - "AAAA"
+      - "CNAME"
+      - "TXT"
+      - "MX"
+      - "SRV"
+    default: "A"
+
+  - question_name: "Page Rule Selection"
+    question_description: "Choose which named page rules to apply"
+    required: true
+    type: multiplechoice
+    variable: page_rule_selection
+    choices:
+      - "Browser TTL"
+      - "Always Use HTTPS"
+      - "all"
+    default: "all"
