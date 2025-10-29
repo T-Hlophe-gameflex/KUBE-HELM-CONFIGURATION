@@ -1,0 +1,15 @@
+- variable: page_rule_selection
+  question_name: "Select Page Rule(s) to Apply"
+  type: multiplechoice
+  choices:
+    - Browser TTL
+    - Always Use HTTPS
+    - all
+  required: true
+  default: all
+
+- variable: source_domain_for_rules
+  question_name: "Source Domain for Page Rules (optional)"
+  type: text
+  required: false
+  default: ""
