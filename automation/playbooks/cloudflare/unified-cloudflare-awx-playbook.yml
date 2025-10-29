@@ -16,26 +16,24 @@
     - name: Resolve domain name from dropdown or manual entry
       set_fact:
         domain: >-
-          {%- if existing_domain is defined and existing_domain != '[MANUAL_ENTRY]' -%}
+          {%- if existing_domain is defined and existing_domain != '[MANUAL_ENTRY]' and existing_domain != '' -%}
             {{ existing_domain }}
-          {%- elif domain is defined and domain != '' -%}
+          {%- elif domain is defined and domain != '' and domain != 'undefined' -%}
             {{ domain }}
           {%- else -%}
             undefined
           {%- endif -%}
-      when: existing_domain is defined or domain is defined
 
     - name: Resolve record name from dropdown or manual entry
       set_fact:
         resolved_record_name: >-
-          {%- if existing_record is defined and existing_record != '[NONE]' -%}
+          {%- if existing_record is defined and existing_record != '[NONE]' and existing_record != '' -%}
             {{ existing_record }}
           {%- elif record_name is defined and record_name != '' -%}
             {{ record_name }}
           {%- else -%}
             
           {%- endif -%}
-      when: existing_record is defined or record_name is defined
 
     - name: " CLOUDFLARE AUTOMATION - {{ cf_action | upper | default('UNDEFINED') }}"
       debug:
@@ -80,7 +78,11 @@
           when: create_zone_result.json.success | default(false)
 
     - name: Standardize domain settings (always runs after create_domain or on demand)
-      when: cf_action in ['create_domain', 'standardize', 'sync', 'create_record']
+      when: 
+        - cf_action in ['create_domain', 'standardize', 'sync', 'create_record']
+        - domain is defined
+        - domain != 'undefined'
+        - domain | length > 0
       block:
         - name: Get zone ID for domain
           uri:
@@ -90,6 +92,7 @@
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
+          check_mode: false
           register: zone_lookup
         - name: Set zone_id fact
           set_fact:
@@ -134,7 +137,11 @@
           when: zone_settings_result is defined
 
     - name: Manage DNS record (create/update/delete)
-      when: cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
+      when: 
+        - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
+        - domain is defined
+        - domain != 'undefined'
+        - domain | length > 0
       block:
         - name: Get zone ID for domain
           uri:
@@ -145,10 +152,12 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: zone_lookup
+          
         - name: Set zone_id fact
           set_fact:
             zone_id: >-
               {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
+              
         - name: List all DNS records for this domain (debug)
           uri:
             url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records"
@@ -158,6 +167,9 @@
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: all_records_lookup
+          when: 
+            - zone_id is defined
+            - zone_id | length > 0
 
         - name: Ensure record_id has a default (allow passing record_id directly)
           set_fact:
