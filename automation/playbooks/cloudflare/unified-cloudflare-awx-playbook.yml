@@ -140,6 +140,227 @@
               - "  Failed: {{ zone_settings_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', false) | map(attribute='item.key') | list if (zone_settings_result is defined and zone_settings_result.results is defined) else [] }}"
           when: zone_settings_result is defined
 
+    # ============================================================================
+    # UPDATE SETTINGS - Zone, Record, or Account Level
+    # ============================================================================
+    - name: Update Settings (Zone/Record/Account Level)
+      when:
+        - cf_action == 'update_settings'
+        - settings_level is defined
+      block:
+        - name: Set settings level tracking
+          set_fact:
+            current_settings_level: "{{ settings_level | default('zone') }}"
+
+        # ========== ZONE LEVEL SETTINGS ==========
+        - name: Update Zone Level Settings
+          when: current_settings_level == 'zone'
+          block:
+            - name: Get zone ID for domain
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              register: zone_lookup
+              check_mode: false
+
+            - name: Set zone_id fact
+              set_fact:
+                zone_id: "{{ zone_lookup.json.result[0].id }}"
+              when: zone_lookup.json.result|length > 0
+
+            - name: Build zone settings to update
+              set_fact:
+                settings_to_update: |
+                  {
+                    {% if cache_level is defined %}"cache_level": "{{ cache_level }}",{% endif %}
+                    {% if browser_cache_ttl is defined %}"browser_cache_ttl": {{ browser_cache_ttl }},{% endif %}
+                    {% if ssl_mode is defined %}"ssl": "{{ ssl_mode }}",{% endif %}
+                    {% if min_tls_version is defined %}"min_tls_version": "{{ min_tls_version }}",{% endif %}
+                    {% if always_use_https is defined %}"always_use_https": "{{ always_use_https }}",{% endif %}
+                    {% if automatic_https_rewrites is defined %}"automatic_https_rewrites": "{{ automatic_https_rewrites }}",{% endif %}
+                    {% if opportunistic_encryption is defined %}"opportunistic_encryption": "{{ opportunistic_encryption }}",{% endif %}
+                    {% if tls_1_3 is defined %}"tls_1_3": "{{ tls_1_3 }}",{% endif %}
+                    {% if http2 is defined %}"http2": "{{ http2 }}",{% endif %}
+                    {% if http3 is defined %}"http3": "{{ http3 }}",{% endif %}
+                    {% if websockets is defined %}"websockets": "{{ websockets }}",{% endif %}
+                    {% if ipv6 is defined %}"ipv6": "{{ ipv6 }}",{% endif %}
+                    {% if brotli is defined %}"brotli": "{{ brotli }}",{% endif %}
+                    {% if hotlink_protection is defined %}"hotlink_protection": "{{ hotlink_protection }}",{% endif %}
+                    {% if security_level is defined %}"security_level": "{{ security_level }}",{% endif %}
+                    {% if challenge_ttl is defined %}"challenge_ttl": {{ challenge_ttl }},{% endif %}
+                    {% if browser_check is defined %}"browser_check": "{{ browser_check }}",{% endif %}
+                    {% if development_mode is defined %}"development_mode": "{{ development_mode }}",{% endif %}
+                    {% if email_obfuscation is defined %}"email_obfuscation": "{{ email_obfuscation }}",{% endif %}
+                    {% if server_side_exclude is defined %}"server_side_exclude": "{{ server_side_exclude }}",{% endif %}
+                    {% if waf is defined %}"waf": "{{ waf }}",{% endif %}
+                    {% if rocket_loader is defined %}"rocket_loader": "{{ rocket_loader }}",{% endif %}
+                    {% if mirage is defined %}"mirage": "{{ mirage }}",{% endif %}
+                    {% if polish is defined %}"polish": "{{ polish }}",{% endif %}
+                    {% if webp is defined %}"webp": "{{ webp }}",{% endif %}
+                    {% if image_resizing is defined %}"image_resizing": "{{ image_resizing }}",{% endif %}
+                    {% if zero_rtt is defined %}"0rtt": "{{ zero_rtt }}",{% endif %}
+                    {% if early_hints is defined %}"early_hints": "{{ early_hints }}",{% endif %}
+                    "placeholder": "remove"
+                  }
+
+            - name: Clean settings object
+              set_fact:
+                clean_settings: "{{ settings_to_update | dict2items | rejectattr('key', 'equalto', 'placeholder') | list | items2dict }}"
+
+            - name: Update each zone setting
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/settings/{{ item.key }}"
+                method: PATCH
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                  Content-Type: "application/json"
+                body_format: json
+                body:
+                  value: "{{ item.value }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              loop: "{{ clean_settings | dict2items }}"
+              register: zone_settings_update_result
+              ignore_errors: yes
+
+            - name: Track zone settings updates
+              set_fact:
+                global_changes: "{{ global_changes + [{'type': 'ZONE_SETTINGS_UPDATED', 'domain': resolved_domain, 'settings': clean_settings | dict2items | map(attribute='key') | list, 'updated_count': zone_settings_update_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', true) | list | length}] }}"
+              when: zone_settings_update_result is defined
+
+            - name: "[GLOBAL LEVEL] Zone Settings Updated"
+              debug:
+                msg:
+                  - "Zone settings updated for {{ resolved_domain }}"
+                  - "  Settings attempted: {{ clean_settings | dict2items | map(attribute='key') | list }}"
+                  - "  Successful: {{ zone_settings_update_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', true) | map(attribute='item.key') | list if zone_settings_update_result is defined else [] }}"
+                  - "  Failed: {{ zone_settings_update_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', false) | map(attribute='item.key') | list if zone_settings_update_result is defined else [] }}"
+
+        # ========== RECORD LEVEL SETTINGS ==========
+        - name: Update DNS Record Level Settings
+          when: current_settings_level == 'record'
+          block:
+            - name: Get zone ID for domain
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              register: zone_lookup_record
+              check_mode: false
+
+            - name: Set zone_id fact
+              set_fact:
+                zone_id: "{{ zone_lookup_record.json.result[0].id }}"
+              when: zone_lookup_record.json.result|length > 0
+
+            - name: Build FQ record name
+              set_fact:
+                fq_record_name: >-
+                  {%- if resolved_record_name is defined and resolved_record_name | length > 0 -%}
+                  {%- if resolved_record_name | regex_search('\.' ~ resolved_domain ~ '$') -%}
+                  {{ resolved_record_name | trim }}
+                  {%- elif resolved_record_name == '@' -%}
+                  {{ resolved_domain }}
+                  {%- else -%}
+                  {{ (resolved_record_name | trim) ~ '.' ~ resolved_domain }}
+                  {%- endif -%}
+                  {%- else -%}
+                  {{ resolved_domain }}
+                  {%- endif -%}
+
+            - name: Find DNS record by name
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?{% if record_type is defined %}type={{ record_type }}&{% endif %}name={{ fq_record_name | urlencode }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              register: record_lookup_for_update
+              when: zone_id is defined
+
+            - name: Set record_id from lookup
+              set_fact:
+                record_id: "{{ record_lookup_for_update.json.result[0].id }}"
+              when:
+                - record_lookup_for_update is defined
+                - record_lookup_for_update.json is defined
+                - record_lookup_for_update.json.result|length > 0
+
+            - name: Get current record details
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
+                method: GET
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              register: current_record_details
+              when: record_id is defined
+
+            - name: Build updated record payload as JSON
+              set_fact:
+                updated_record_payload_json: >-
+                  {{ ({
+                      'type': current_record_details.json.result.type,
+                      'name': current_record_details.json.result.name,
+                      'content': (record_value | default(current_record_details.json.result.content)),
+                      'ttl': ((record_ttl | default(current_record_details.json.result.ttl)) | int),
+                      'proxied': ((record_proxied | default(current_record_details.json.result.proxied)) | bool)
+                    }) | to_json }}
+              when: current_record_details is defined and current_record_details.json.result is defined
+
+            - name: Update DNS record settings
+              uri:
+                url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
+                method: PUT
+                headers:
+                  Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+                  Content-Type: "application/json"
+                body: "{{ updated_record_payload_json }}"
+                return_content: true
+                validate_certs: "{{ cf_validate_certs | default(true) }}"
+              register: record_update_result
+              when:
+                - record_id is defined
+                - updated_record_payload_json is defined
+
+            - name: Track record settings update
+              set_fact:
+                domain_changes: "{{ domain_changes + [{'type': 'RECORD_SETTINGS_UPDATED', 'record': fq_record_name, 'ttl': record_ttl | default('unchanged'), 'proxied': record_proxied | default('unchanged'), 'status': 'success' if (record_update_result is defined and record_update_result.json.success) else 'failed'}] }}"
+              when: record_update_result is defined
+
+            - name: "[DOMAIN LEVEL] Record Settings Updated"
+              debug:
+                msg:
+                  - "DNS record settings updated: {{ fq_record_name }}"
+                  - "  TTL: {{ record_ttl | default('unchanged') }}"
+                  - "  Proxied: {{ record_proxied | default('unchanged') }}"
+                  - "  Status: {{ 'Success' if (record_update_result is defined and record_update_result.json.success) else 'Failed' }}"
+
+        # ========== ACCOUNT LEVEL SETTINGS ==========
+        - name: Update Account Level Settings
+          when: current_settings_level == 'account'
+          block:
+            - name: "[PLATFORM LEVEL] Account Settings Update"
+              debug:
+                msg:
+                  - "Account-level settings management"
+                  - "  Note: Account settings typically require different API endpoints"
+                  - "  Examples: Billing, subscriptions, account members"
+                  - "  This functionality can be extended based on specific requirements"
+
+            - name: Track account level operation
+              set_fact:
+                platform_changes: "{{ platform_changes + [{'type': 'ACCOUNT_SETTINGS_INFO', 'message': 'Account level settings require specific implementation per setting type'}] }}"
+
     - name: Manage DNS record (create/update/delete)
       when: 
         - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
@@ -683,6 +904,16 @@
     # ============================================================================
     # FINAL SUMMARY - Categorized Output
     # ============================================================================
+    # Actions supported:
+    #   - create_domain: Create new Cloudflare zone
+    #   - standardize: Apply standard zone settings
+    #   - update_settings: Update settings at zone/record/account level
+    #   - create_record: Create new DNS record
+    #   - update_record: Update existing DNS record
+    #   - delete_record: Delete DNS record
+    #   - clone_record: Clone record from one domain to another
+    #   - sync: Sync platform records across all zones
+    # ============================================================================
     - name: "=== EXECUTION SUMMARY ==="
       debug:
         msg: |
@@ -693,6 +924,7 @@
           
           Action: {{ cf_action | upper | default('NONE') }}
           Domain: {{ resolved_domain | default('N/A') }}
+          {% if settings_level is defined %}Settings Level: {{ settings_level | upper }}{% endif %}
           
           [DOMAIN LEVEL] Changes: {{ domain_changes | length }} operation(s)
           {% for change in domain_changes %}
