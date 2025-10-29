@@ -1,0 +1,88 @@
+{# Modern Cloudflare Rules Template - Replaces Legacy Page Rules #}
+{# This template generates configurations for Cloudflare's modern Rules Engine #}
+
+{% if rule_action == 'force_https' %}
+{
+  "action": "redirect",
+  "action_parameters": {
+    "from_value": {
+      "status_code": 301,
+      "target_url": {
+        "expression": "concat(\"https://\", http.host, http.request.uri.path)"
+      },
+      "preserve_query_string": true
+    }
+  },
+  "expression": "(http.request.ssl == false)",
+  "description": "Force HTTPS redirect for {{ domain }}",
+  "enabled": true
+}
+
+{% elif rule_action == 'redirect_to_www' %}
+{
+  "action": "redirect",
+  "action_parameters": {
+    "from_value": {
+      "status_code": 301,
+      "target_url": {
+        "expression": "concat(\"https://www.\", http.host, http.request.uri.path)"
+      },
+      "preserve_query_string": true
+    }
+  },
+  "expression": "(http.host eq \"{{ domain }}\")",
+  "description": "Redirect apex to www subdomain for {{ domain }}",
+  "enabled": true
+}
+
+{% elif rule_action == 'redirect_from_www' %}
+{
+  "action": "redirect",
+  "action_parameters": {
+    "from_value": {
+      "status_code": 301,
+      "target_url": {
+        "expression": "concat(\"https://\", regex_replace(http.host, \"^www\\\\.\", \"\"), http.request.uri.path)"
+      },
+      "preserve_query_string": true
+    }
+  },
+  "expression": "(http.host eq \"www.{{ domain }}\")",
+  "description": "Redirect www to apex domain for {{ domain }}",
+  "enabled": true
+}
+
+{% elif rule_action == 'cache_everything' %}
+{
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "cache": true,
+    "edge_ttl": {
+      "mode": "override_origin",
+      "default": 7200
+    }
+  },
+  "expression": "(http.host eq \"{{ domain }}\")",
+  "description": "Cache everything for 2 hours on {{ domain }}",
+  "enabled": true
+}
+
+{% elif rule_action == 'browser_cache_ttl' %}
+{
+  "action": "set_cache_settings",
+  "action_parameters": {
+    "browser_ttl": {
+      "mode": "override_origin",
+      "default": 14400
+    }
+  },
+  "expression": "(http.host eq \"{{ domain }}\")",
+  "description": "Set browser cache TTL to 4 hours for {{ domain }}",
+  "enabled": true
+}
+
+{% else %}
+{
+  "error": "Unknown rule_action: {{ rule_action }}"
+}
+{% endif %}

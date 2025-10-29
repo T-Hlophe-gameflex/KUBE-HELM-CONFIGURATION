@@ -10,9 +10,7 @@
       "create_record",
       "update_record",
       "delete_record",
-      "clone_record",
-      "standardize",
-      "sync"
+      "clone_record"
     ],
     "default": "create_record"
   },
@@ -26,11 +24,22 @@
   },
   {
     "question_name": "Record Name",
-    "question_description": "DNS record name (e.g., www, api, or @ for root)",
+    "question_description": "DNS record name for NEW records (e.g., www, api, or @ for root). Leave empty if selecting from existing records below.",
     "required": false,
     "type": "text",
     "variable": "record_name",
     "default": ""
+  },
+  {
+    "question_name": "Existing Record Name",
+    "question_description": "Select an existing DNS record (for update/delete operations). Leave as 'none' if creating a new record.",
+    "required": false,
+    "type": "multiplechoice",
+    "variable": "existing_record_name",
+    "choices": [
+      "none"
+    ],
+    "default": "none"
   },
   {
     "question_name": "Record Type",
@@ -81,17 +90,18 @@
     "default": "false"
   },
   {
-    "question_name": "Page Rule Template",
-    "question_description": "Select a page rule to apply to this domain (or 'none' to skip)",
+    "question_name": "Cloudflare Rule Action",
+    "question_description": "Apply modern Cloudflare rules (Transform/Redirect/Configuration Rules). Select 'none' to skip.",
     "required": false,
     "type": "multiplechoice",
-    "variable": "selected_page_rule",
+    "variable": "rule_action",
     "choices": [
       "none",
-      "Browser Cache 5m",
-      "Cache Everything",
-      "Block known bots",
-      "all"
+      "force_https",
+      "redirect_to_www",
+      "redirect_from_www",
+      "cache_everything",
+      "browser_cache_ttl"
     ],
     "default": "none"
   }

@@ -36,97 +36,84 @@ Found 5 domains:
 ✓ Survey updated successfully!
 ```
 
-### 2. update-dns-records-dropdown.sh
+### 2. list-all-dns-records.sh
 
-Updates the DNS records dropdown in the AWX survey with all records from ALL domains in your Cloudflare account.
+Displays all DNS records from all domains in your Cloudflare account. This is a reference tool to help you see what records exist before launching AWX jobs.
 
 **Usage:**
 ```bash
-export AWX_HOST="http://127.0.0.1:8052"
-export AWX_TOKEN="your_awx_token"
 export CLOUDFLARE_API_TOKEN="your_cloudflare_token"
 
-./automation/update-dns-records-dropdown.sh
+./automation/list-all-dns-records.sh
 ```
 
 **What it does:**
 - Fetches all zones (domains) from your Cloudflare account
-- Retrieves all DNS records from every domain
-- Displays total records count and unique record names
-- Updates the `record_name` question to include all existing record names
-- Removes duplicate record names across domains
-- Records are shown as just the name (no type suffix)
+- Retrieves and displays all DNS records from every domain
+- Shows records with full details: type, name, content, TTL, proxied status, ID
+- Lists all unique record names at the end for easy reference
+- Provides a summary of total domains and records
 
 **Output Example:**
 ```
-Fetching all zones from Cloudflare account...
-Found 2 zones
+╔════════════════════════════════════════════════════════════════╗
+║          Cloudflare DNS Records - All Domains                 ║
+╚════════════════════════════════════════════════════════════════╝
 
-Fetching DNS records for: efustryton.co.za
-  ✓ Found 3 records
-Fetching DNS records for: efutechnologies.co.za
-  ✓ Found 6 records
+Found 2 domains in your Cloudflare account
 
-======================================
-Total DNS Records: 9
-======================================
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Domain: efutechnologies.co.za
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [CNAME] www.efutechnologies.co.za
+    → efutechnologies.co.za
+    TTL: 3600 | Proxied: true | ID: abc123
 
-Unique record names: 8
-
-Sample records in dropdown:
-  - drtdtydy.efutechnologies.co.za
-  - efustryton.co.za
-  - rembu--3.efutechnologies.co.za
+All unique record names (use these when creating/updating/deleting):
+  • drtdtydy.efutechnologies.co.za
+  • efustryton.co.za
+  • www.efutechnologies.co.za
   ...
-
-✓ Survey updated successfully!
-
-Note: AWX multiplechoice fields allow both:
-  1. Selecting from dropdown (all existing records)
-  2. Typing a new record name manually
 ```
+
+### 3. update-dns-records-dropdown.sh (Deprecated)
+
+⚠️ **Note:** This script is now deprecated since the record_name field is a text input, not a dropdown. Use `list-all-dns-records.sh` instead to see all available records.
+
+The record_name field in the AWX survey is now a **text field** that allows free-form input. Simply type the record name you want to create/update/delete.
 
 ## Workflow
 
-### For Creating/Updating Records
+### For Creating/Updating/Deleting Records
 
-1. **Update domain dropdown:**
+1. **Update domain dropdown (optional - if domains changed):**
    ```bash
    ./automation/update-survey-dropdowns.sh
    ```
 
-2. **Update DNS records dropdown with ALL account records:**
+2. **List all DNS records to see what exists:**
    ```bash
-   ./automation/update-dns-records-dropdown.sh
+   ./automation/list-all-dns-records.sh
    ```
+   This will show you all existing record names across all domains. Copy the record name you want to work with.
 
 3. **Launch the AWX template:**
-   - Domain dropdown will show all your Cloudflare domains
-   - Record name dropdown will show ALL existing records from ALL domains
-   - You can select an existing record from the dropdown OR
-   - You can manually type a new record name
-   - The field is multiplechoice but NOT required, so both options work
+   - Select domain from dropdown OR type domain name
+   - Type the record name in the text field (no dropdown, free-form entry)
+   - Fill in other fields as needed
+   - Launch the job
 
-### For Delete Operations
-
-1. Update the DNS records dropdown to see all available records:
-   ```bash
-   ./automation/update-dns-records-dropdown.sh
-   ```
-
-2. Launch the template and select the record to delete from the dropdown
-
-### Record Name Field Behavior
+### Record Name Field - Text Input
 
 The `record_name` field is configured as:
-- **Type:** multiplechoice (shows dropdown)
-- **Required:** false (allows empty or manual entry)
-- **Choices:** All unique DNS record names from your entire Cloudflare account
+- **Type:** text (free-form input)
+- **Required:** false (optional field)
+- **No dropdown** - You type the record name manually
 
-This means you can:
-1. **Select from dropdown** - Choose any existing record name from any domain
-2. **Type manually** - Enter a new record name that doesn't exist yet
-3. **Leave empty** - For operations that don't need a specific record name
+**How to use it:**
+1. **For new records** - Type the new record name you want to create (e.g., `www`, `api`, `mail`)
+2. **For existing records** - Run `list-all-dns-records.sh` first to see all records, then copy/paste the exact record name
+3. **For root domain** - Use `@` or leave empty depending on the operation
 
 ## Playbook Enhancements
 

@@ -116,30 +116,17 @@ fi
 
 echo -e "${GREEN}Updating survey with ALL DNS records from account...${NC}"
 
-# Update the record_name question - keep it as TEXT type but add choices for suggestions
-UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson records "$RECORD_CHOICES" '
-    .spec = (.spec | map(
-        if .variable == "record_name" then
-            .type = "text" |
-            .required = false |
-            .question_description = "Enter record name or select from existing records across all domains"
-        else
-            .
-        end
-    ))
-')
+# Build choices array with "none" as first option
+RECORD_CHOICES_WITH_NONE=$(echo '["none"]' | jq --argjson records "$RECORD_CHOICES" '. + $records')
 
-# Note: AWX text fields don't support "choices" in the same way as multiplechoice
-# So we'll keep record_name as multiplechoice but mark it as not required
-# This allows both selection from dropdown AND manual entry
-
-UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson records "$RECORD_CHOICES" '
+# Update the existing_record_name question with dynamic choices
+UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson records "$RECORD_CHOICES_WITH_NONE" '
     .spec = (.spec | map(
-        if .variable == "record_name" then
+        if .variable == "existing_record_name" then
             .type = "multiplechoice" |
             .choices = $records |
             .required = false |
-            .question_description = "Select existing record from any domain, or type new name manually"
+            .question_description = "Select existing record from any domain (for update/delete), or leave as '\''none'\'' for new records"
         else
             .
         end
