@@ -3,6 +3,130 @@
 # Import this configuration into AWX after deployment
 
 job_templates:
+  - name: "unified-cloudflare-awx-template"
+    description: "Unified template for Cloudflare domain + record management (generated)"
+    job_type: "run"
+    inventory: "localhost"
+    project: "Cloudflare DNS Project"
+    playbook: "automation/playbooks/cloudflare/wrapper-unified-cloudflare-awx.yml"
+    credential: "Cloudflare API Credentials"
+    verbosity: 1
+    ask_variables_on_launch: true
+    survey_enabled: true
+    become_enabled: false
+    survey_spec:
+      name: "Cloudflare Unified Management Survey"
+      description: "Unified survey for Cloudflare domain, record, and page rule management"
+      spec:
+        - question_name: "Action"
+          question_description: "Action to perform"
+          required: true
+          type: "multiplechoice"
+          variable: "cf_action"
+          choices:
+            - "create_domain"
+            - "create_record"
+            - "update_record"
+            - "delete_record"
+            - "sync"
+          default: "create_record"
+
+        - question_name: "Domain"
+          question_description: "Select existing domain"
+          required: false
+          type: "multiplechoice"
+          variable: "selected_domain"
+          choices: []
+          default: ""
+
+        - question_name: "New Domain Name"
+          question_description: "Enter a new domain name to create (if creating a domain)"
+          required: false
+          type: "text"
+          variable: "new_domain"
+          default: ""
+
+        - question_name: "Select Existing Record"
+          question_description: "Pick an existing record from the domain (populated by dropdown files)"
+          required: false
+          type: "multiplechoice"
+          variable: "selected_record_name"
+          choices: []
+          default: ""
+
+        - question_name: "Record Name"
+          question_description: "Host/label for the record (use @ for root)"
+          required: false
+          type: "text"
+          variable: "record_name"
+          default: ""
+
+        - question_name: "Record Type"
+          question_description: "DNS record type"
+          required: false
+          type: "multiplechoice"
+          variable: "record_type"
+          choices:
+            - "A"
+            - "AAAA"
+            - "CNAME"
+            - "MX"
+            - "TXT"
+            - "SRV"
+            - "CAA"
+            - "NS"
+          default: "A"
+
+        - question_name: "Record Value"
+          question_description: "IP/hostname/text value for record"
+          required: false
+          type: "text"
+          variable: "record_value"
+          default: ""
+
+        - question_name: "TTL"
+          question_description: "Time-to-live in seconds or 'auto'"
+          required: false
+          type: "multiplechoice"
+          variable: "ttl"
+          choices:
+            - "auto"
+            - "60"
+            - "120"
+            - "300"
+            - "600"
+            - "3600"
+            - "7200"
+          default: "auto"
+
+        - question_name: "Proxy Status"
+          question_description: "Set Cloudflare proxy status for this record"
+          required: false
+          type: "multiplechoice"
+          variable: "proxied"
+          choices:
+            - "true"
+            - "false"
+          default: "true"
+
+        - question_name: "Page Rule Selection"
+          question_description: "Choose which named page rules to apply to the target domain (or 'all')"
+          required: true
+          type: "multiplechoice"
+          variable: "page_rule_selection"
+          choices:
+            - "Browser TTL"
+            - "Always Use HTTPS"
+            - "all"
+          default: "all"
+
+        - question_name: "Source Domain for Page Rules (optional)"
+          question_description: "If set, copy page rules from this domain and apply to the target domain"
+          required: false
+          type: "text"
+          variable: "source_domain_for_rules"
+          default: ""
+
   - name: "Cloudflare Domain Sync"
     description: "Sync Cloudflare domains to AWX surveys dynamically"
     job_type: "run"
