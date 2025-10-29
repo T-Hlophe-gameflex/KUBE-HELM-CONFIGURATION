@@ -85,35 +85,27 @@ This document shows how AWX survey fields flow through the playbook to Cloudflar
 - **Description**: "Cache level mode for the domain"
 
 **Playbook Usage:**
-- **File**: `automation/templates/cloudflare_modern_rules.j2`
-- **Lines**: 58-66
-- **Rule Type**: `cache_level`
-- **Trigger**: When `rule_action` includes `'cache_level'` or `'all'`
+- **File**: `automation/playbooks/cloudflare/unified-cloudflare-awx-playbook.yml`
+- **Lines**: 76-77
+- **Setting Type**: `Zone Setting` (not a rule)
+- **Trigger**: When `cf_action` includes `'create_domain'`, `'standardize'`, or `'sync'`
 
-**Template Code:**
-```jinja
-{% elif rule_action == 'cache_level' %}
-{
-  "action": "set_cache_settings",
-  "action_parameters": {
-    "cache": {{ 'false' if (cache_level_mode | default('bypass')) == 'bypass' else 'true' }},
-    "cache_level": "{{ cache_level_mode | default('bypass') }}"
-  },
-  "expression": "(http.host eq \"{{ domain }}\")",
-  "description": "Set cache level to {{ cache_level_mode | default('bypass') }} for {{ domain }}",
-  "enabled": true
-}
-{% endif %}
+**Playbook Code:**
+```yaml
+- name: Merge zone settings with survey values
+  set_fact:
+    merged_zone_settings: "{{ standard_zone_settings | default({}) | combine({'ssl_recommender': (ssl_tls_recommender | default('enabled')), 'cache_level': (cache_level_mode | default('standard'))}) }}"
 ```
 
 **Cloudflare API:**
-- **Endpoint**: `POST /zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint`
-- **Ruleset Phase**: `http_request_cache_settings`
-- **Result**: Controls what types of content Cloudflare caches
+- **Endpoint**: `PATCH /zones/{zone_id}/settings/cache_level`
+- **API Section**: Zone Settings (not Rules API)
+- **Result**: Controls what types of content Cloudflare caches at the zone level
 
-**Dynamic Behavior:**
-- `bypass`: Sets `"cache": false` (disables caching)
-- Other modes: Sets `"cache": true` with specified level
+**Important Note:**
+- ⚠️ `cache_level` is NOT supported in the Rules API (Results in "invalid JSON: unknown field cache_level")
+- ✅ Must be applied as a zone-level setting via Zone Settings API
+- Applied automatically when standardizing zones or creating new domains
 
 ---
 

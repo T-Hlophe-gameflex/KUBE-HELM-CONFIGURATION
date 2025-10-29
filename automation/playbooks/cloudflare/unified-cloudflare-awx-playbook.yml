@@ -10,9 +10,6 @@
     platform_changes: []    # AWX/automation platform updates
   tasks:
 
-    #=============================================================================
-    # EXECUTION SUMMARY HEADER
-    #=============================================================================
     - name: " CLOUDFLARE AUTOMATION - {{ cf_action | upper | default('UNDEFINED') }}"
       debug:
         msg:
@@ -56,7 +53,7 @@
           when: create_zone_result.json.success | default(false)
 
     - name: Standardize domain settings (always runs after create_domain or on demand)
-      when: cf_action in ['create_domain', 'standardize', 'sync']
+      when: cf_action in ['create_domain', 'standardize', 'sync', 'create_record']
       block:
         - name: Get zone ID for domain
           uri:
@@ -143,7 +140,7 @@
 
             - name: Set rule actions list (expand 'all' to individual rules)
               set_fact:
-                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if survey_rule_action == 'all' else ([survey_rule_action] if survey_rule_action != 'none' else []) }}"
+                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_level', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if survey_rule_action == 'all' else ([survey_rule_action] if survey_rule_action != 'none' else []) }}"
 
             - name: Apply each rule action
               include_tasks: "../tasks/apply_single_modern_rule.yml"
