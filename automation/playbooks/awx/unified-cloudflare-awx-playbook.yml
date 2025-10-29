@@ -288,8 +288,7 @@
                 rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_everything', 'browser_cache_ttl'] if rule_action == 'all' else [rule_action] }}"
 
             - name: Apply each rule action
-              include_tasks: 
-                file: "{{ playbook_dir }}/tasks/apply_single_modern_rule.yml"
+              include_tasks: "../tasks/apply_single_modern_rule.yml"
               loop: "{{ rule_actions_to_apply }}"
               loop_control:
                 loop_var: current_rule_action
