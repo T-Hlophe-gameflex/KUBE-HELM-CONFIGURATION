@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# Script to update DNS records dropdown for a specific domain
-# Usage: ./update-dns-records-dropdown.sh <domain>
-# Example: ./update-dns-records-dropdown.sh efutechnologies.co.za
+# Script to update DNS records dropdown with ALL records from ALL domains
+# Usage: ./update-dns-records-dropdown.sh
+# This will fetch all zones and all DNS records across your entire Cloudflare account
 #
 
 set -e
@@ -17,17 +17,8 @@ CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
-# Check if domain argument provided
-if [ -z "$1" ]; then
-    echo -e "${RED}Error: Domain name required${NC}"
-    echo "Usage: $0 <domain>"
-    echo "Example: $0 efutechnologies.co.za"
-    exit 1
-fi
-
-DOMAIN="$1"
 
 # Check prerequisites
 if [ -z "$AWX_TOKEN" ]; then
@@ -42,58 +33,74 @@ if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
     exit 1
 fi
 
-echo -e "${GREEN}Fetching zone ID for domain: $DOMAIN${NC}"
+echo -e "${GREEN}Fetching all zones from Cloudflare account...${NC}"
 
-# Get zone ID for the domain
-ZONE_LOOKUP=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones?name=$DOMAIN" \
+# Get all zones
+ZONES_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones" \
     -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
     -H "Content-Type: application/json")
 
 # Check if request was successful
-if ! echo "$ZONE_LOOKUP" | jq -e '.success' > /dev/null 2>&1; then
-    echo -e "${RED}Error fetching zone from Cloudflare API${NC}"
-    echo "$ZONE_LOOKUP" | jq '.errors' 2>/dev/null || echo "$ZONE_LOOKUP"
+if ! echo "$ZONES_RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
+    echo -e "${RED}Error fetching zones from Cloudflare API${NC}"
+    echo "$ZONES_RESPONSE" | jq '.errors' 2>/dev/null || echo "$ZONES_RESPONSE"
     exit 1
 fi
 
-ZONE_ID=$(echo "$ZONE_LOOKUP" | jq -r '.result[0].id // empty')
+# Get zone IDs and names
+ZONE_DATA=$(echo "$ZONES_RESPONSE" | jq -r '.result[] | "\(.id)|\(.name)"')
+ZONE_COUNT=$(echo "$ZONE_DATA" | wc -l | tr -d ' ')
 
-if [ -z "$ZONE_ID" ]; then
-    echo -e "${RED}Error: Zone not found for domain $DOMAIN${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}Zone ID: $ZONE_ID${NC}"
+echo -e "${GREEN}Found $ZONE_COUNT zones${NC}"
 echo ""
-echo -e "${GREEN}Fetching DNS records for $DOMAIN...${NC}"
 
-# Fetch all DNS records for this zone
-RECORDS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-    -H "Content-Type: application/json")
+# Initialize array to collect all record names
+ALL_RECORDS=()
+TOTAL_RECORDS=0
 
-# Check if request was successful
-if ! echo "$RECORDS_RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
-    echo -e "${RED}Error fetching DNS records from Cloudflare API${NC}"
-    echo "$RECORDS_RESPONSE" | jq '.errors' 2>/dev/null || echo "$RECORDS_RESPONSE"
-    exit 1
-fi
+# Loop through each zone and fetch DNS records
+while IFS='|' read -r ZONE_ID ZONE_NAME; do
+    echo -e "${BLUE}Fetching DNS records for: $ZONE_NAME${NC}"
+    
+    # Fetch DNS records for this zone
+    RECORDS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+        -H "Content-Type: application/json")
+    
+    # Check if request was successful
+    if echo "$RECORDS_RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
+        # Extract just the record names (without type suffix)
+        RECORD_NAMES=$(echo "$RECORDS_RESPONSE" | jq -r '.result[].name' | sort)
+        RECORD_COUNT=$(echo "$RECORD_NAMES" | wc -l | tr -d ' ')
+        
+        echo -e "  ${GREEN}✓${NC} Found $RECORD_COUNT records"
+        
+        # Add to our collection
+        while IFS= read -r record_name; do
+            ALL_RECORDS+=("$record_name")
+        done <<< "$RECORD_NAMES"
+        
+        TOTAL_RECORDS=$((TOTAL_RECORDS + RECORD_COUNT))
+    else
+        echo -e "  ${RED}✗${NC} Failed to fetch records"
+    fi
+done <<< "$ZONE_DATA"
 
-# Display records in a nice format
 echo ""
 echo -e "${GREEN}======================================${NC}"
-echo -e "${GREEN}DNS RECORDS FOR: $DOMAIN${NC}"
+echo -e "${GREEN}Total DNS Records: $TOTAL_RECORDS${NC}"
 echo -e "${GREEN}======================================${NC}"
-
-echo "$RECORDS_RESPONSE" | jq -r '.result[] | 
-    "[\(.type)] \(.name)\n  → \(.content)\n  TTL: \(.ttl) | Proxied: \(.proxied // false) | ID: \(.id)\n"'
-
-RECORD_COUNT=$(echo "$RECORDS_RESPONSE" | jq '.result | length')
-echo -e "${GREEN}Total Records: $RECORD_COUNT${NC}"
 echo ""
 
-# Build record name choices for survey (format: "record_name (type)")
-RECORD_CHOICES=$(echo "$RECORDS_RESPONSE" | jq -r '.result[] | "\(.name) (\(.type))"' | sort | jq -R . | jq -s .)
+# Remove duplicates and sort
+UNIQUE_RECORDS=($(printf '%s\n' "${ALL_RECORDS[@]}" | sort -u))
+UNIQUE_COUNT=${#UNIQUE_RECORDS[@]}
+
+echo -e "${YELLOW}Unique record names: $UNIQUE_COUNT${NC}"
+echo ""
+
+# Convert to JSON array for survey
+RECORD_CHOICES=$(printf '%s\n' "${UNIQUE_RECORDS[@]}" | jq -R . | jq -s .)
 
 echo -e "${GREEN}Fetching current survey specification...${NC}"
 
@@ -107,15 +114,32 @@ if ! echo "$CURRENT_SURVEY" | jq -e '.spec' > /dev/null 2>&1; then
     exit 1
 fi
 
-echo -e "${GREEN}Updating survey with DNS records for $DOMAIN...${NC}"
+echo -e "${GREEN}Updating survey with ALL DNS records from account...${NC}"
 
-# Update the record_name question with dynamic choices
+# Update the record_name question - keep it as TEXT type but add choices for suggestions
+UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson records "$RECORD_CHOICES" '
+    .spec = (.spec | map(
+        if .variable == "record_name" then
+            .type = "text" |
+            .required = false |
+            .question_description = "Enter record name or select from existing records across all domains"
+        else
+            .
+        end
+    ))
+')
+
+# Note: AWX text fields don't support "choices" in the same way as multiplechoice
+# So we'll keep record_name as multiplechoice but mark it as not required
+# This allows both selection from dropdown AND manual entry
+
 UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson records "$RECORD_CHOICES" '
     .spec = (.spec | map(
         if .variable == "record_name" then
             .type = "multiplechoice" |
             .choices = $records |
-            .question_description = "Select existing record or enter new name (showing records from last domain queried)"
+            .required = false |
+            .question_description = "Select existing record from any domain, or type new name manually"
         else
             .
         end
@@ -133,7 +157,15 @@ HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/awx_survey_response.txt -X POST \
 if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
     echo -e "${GREEN}✓ Survey updated successfully!${NC}"
     echo ""
-    echo -e "${YELLOW}DNS records dropdown now includes $RECORD_COUNT records from $DOMAIN${NC}"
+    echo -e "${YELLOW}DNS records dropdown now includes:${NC}"
+    echo -e "  - ${GREEN}$UNIQUE_COUNT unique record names${NC} from $ZONE_COUNT domains"
+    echo -e "  - ${BLUE}Total $TOTAL_RECORDS records processed${NC}"
+    echo ""
+    echo -e "${YELLOW}Sample records in dropdown:${NC}"
+    printf '%s\n' "${UNIQUE_RECORDS[@]}" | head -10 | sed 's/^/  - /'
+    if [ $UNIQUE_COUNT -gt 10 ]; then
+        echo -e "  ... and $((UNIQUE_COUNT - 10)) more"
+    fi
 else
     echo -e "${RED}Error updating survey (HTTP $HTTP_CODE)${NC}"
     cat /tmp/awx_survey_response.txt | jq '.' 2>/dev/null || cat /tmp/awx_survey_response.txt
@@ -144,4 +176,8 @@ echo ""
 echo -e "${GREEN}======================================${NC}"
 echo -e "${GREEN}Survey updated successfully!${NC}"
 echo -e "${GREEN}======================================${NC}"
+echo ""
+echo -e "${BLUE}Note:${NC} AWX multiplechoice fields allow both:"
+echo "  1. Selecting from dropdown (all $UNIQUE_COUNT existing records)"
+echo "  2. Typing a new record name manually"
 echo ""
