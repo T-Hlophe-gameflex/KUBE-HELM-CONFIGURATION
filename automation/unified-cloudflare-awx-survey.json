@@ -101,12 +101,13 @@
   },
   {
     "question_name": "Cloudflare Rule Action",
-    "question_description": "Apply modern Cloudflare rules (Transform/Redirect/Configuration Rules). Select 'none' to skip.",
+    "question_description": "Apply modern Cloudflare rules (Transform/Redirect/Configuration Rules). Select 'all' to apply all rules, or choose a specific rule.",
     "required": false,
     "type": "multiplechoice",
     "variable": "rule_action",
     "choices": [
       "none",
+      "all",
       "force_https",
       "redirect_to_www",
       "redirect_from_www",
