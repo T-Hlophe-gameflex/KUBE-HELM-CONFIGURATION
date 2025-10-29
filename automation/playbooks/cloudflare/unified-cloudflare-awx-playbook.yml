@@ -69,7 +69,7 @@
 
         - name: Track zone creation
           set_fact:
-            domain_changes: "{{ domain_changes + [{'type': 'ZONE_CREATED', 'domain': domain, 'zone_id': create_zone_result.json.result.id | default('N/A'), 'status': 'SUCCESS' if create_zone_result.json.success else 'FAILED'}] }}"
+            domain_changes: "{{ domain_changes + [{'type': 'ZONE_CREATED', 'domain': resolved_domain, 'zone_id': create_zone_result.json.result.id | default('N/A'), 'status': 'SUCCESS' if create_zone_result.json.success else 'FAILED'}] }}"
           when: create_zone_result.json is defined
 
         - name: "[DOMAIN LEVEL] Zone Created: {{ resolved_domain }}"
@@ -126,7 +126,7 @@
 
         - name: Track zone settings
           set_fact:
-            global_changes: "{{ global_changes + [{'type': 'ZONE_SETTINGS_APPLIED', 'domain': domain, 'settings': standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | list}] }}"
+            global_changes: "{{ global_changes + [{'type': 'ZONE_SETTINGS_APPLIED', 'domain': resolved_domain, 'settings': standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | list}] }}"
           when: zone_settings_result is defined
 
         - name: "[GLOBAL LEVEL] Zone Settings Applied: {{ resolved_domain }}"
@@ -198,6 +198,8 @@
               loop: "{{ rule_actions_to_apply }}"
               loop_control:
                 loop_var: current_rule_action
+              vars:
+                domain: "{{ resolved_domain }}"
               when: rule_actions_to_apply | length > 0
 
         # ========== End of Modern Rules Section ==========
@@ -370,6 +372,14 @@
             record_id: "{{ record_lookup.json.result[0].id }}"
           when: record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0
 
+        - name: Auto-convert create_record to update_record when record exists (idempotency)
+          set_fact:
+            cf_action: "update_record"
+          when:
+            - cf_action == 'create_record'
+            - record_id is defined
+            - record_id != ''
+
         - name: Build desired_record_name for local scan (lower-trim)
           set_fact:
             desired_record_name: "{{ (fq_record_name | trim | lower) if (fq_record_name is defined and fq_record_name|length > 0) else (effective_record_name | trim | lower) }}"
@@ -491,10 +501,10 @@
               {{ record_result.json if (record_result is defined and record_result.json is defined) else (record_curl_result.stdout | default('') | from_json if (record_curl_result is defined and record_curl_result.stdout is defined and record_curl_result.stdout|length > 0) else {}) }}
           when: cf_action == 'create_record'
 
-        - name: Detect duplicate-record error (Cloudflare 81058)
+        - name: Detect duplicate-record error (Cloudflare 81053, 81058)
           set_fact:
             cf_duplicate_error: >-
-              {{ (cf_record_response.errors is defined and (81058 in (cf_record_response.errors | map(attribute='code') | list))) if (cf_record_response is defined) else false }}
+              {{ (cf_record_response.errors is defined and ((81053 in (cf_record_response.errors | map(attribute='code') | list)) or (81058 in (cf_record_response.errors | map(attribute='code') | list)))) if (cf_record_response is defined) else false }}
           when: cf_action == 'create_record'
 
         - name: Lookup existing record ID when duplicate detected
