@@ -14,7 +14,7 @@
 
     - name: Show selected action and input
       debug:
-        msg: "Action: {{ cf_action | default('undefined') }}, Domain: {{ domain | default('undefined') }}, Record: {{ record_name | default(selected_record_name | default('undefined')) }} ({{ record_type | default('undefined') }})"
+        msg: "Action: {{ cf_action | default('undefined') }}, Domain: {{ domain | default('undefined') }}, New Record: {{ record_name | default('') }}, Existing Record: {{ existing_record_name | default('none') }}, Type: {{ record_type | default('undefined') }}"
 
     - name: Create domain (zone) if requested
       when: cf_action == 'create_domain'
@@ -481,10 +481,10 @@
               debug:
                 var: page_rules_apply_results
               when: page_rules_apply_results is defined
-        - name: Set effective record name (from dropdown or input)
+        - name: Set effective record name (from new text input or existing dropdown)
           set_fact:
             effective_record_name: >-
-              {{ record_name if record_name is defined and record_name|length > 0 else selected_record_name if selected_record_name is defined and selected_record_name|length > 0 else '' }}
+              {{ existing_record_name if (existing_record_name is defined and existing_record_name != 'none' and existing_record_name|length > 0) else (record_name if (record_name is defined and record_name|length > 0) else '') }}
 
         - name: Trim and normalize effective_record_name (strip quotes, collapse spaces)
           set_fact:
@@ -736,9 +736,9 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
               Content-Type: "application/json"
-            # validate JSON payload before sending
-            body_format: raw
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
+            # Read JSON file and send as properly formatted JSON
+            body_format: json
+            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
             return_content: true
             validate_certs: true
           when: cf_action in ['create_record','update_record'] and (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
@@ -810,8 +810,8 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
               Content-Type: "application/json"
-            body_format: raw
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
+            body_format: json
+            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           when: cf_action == 'create_record' and cf_duplicate_error | default(false) and record_id is defined and record_id | length > 0
@@ -831,9 +831,9 @@
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
               Content-Type: "application/json"
-            # validate JSON payload before sending
-            body_format: raw
-            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') }}"
+            # Read JSON file and send as properly formatted JSON
+            body_format: json
+            body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
             return_content: true
             validate_certs: false
           when: cf_action in ['create_record','update_record'] and not (cf_validate_certs | default(true) | bool) and not (cf_force_curl | default(false) | bool)
