@@ -9,3 +9,4 @@ standard_zone_settings:
   cache_level: "standard"
   ipv6: "on"
   http2: "on"
+  ssl_recommender: "on"

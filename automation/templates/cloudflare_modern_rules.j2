@@ -56,11 +56,11 @@
 {
   "action": "set_cache_settings",
   "action_parameters": {
-    "cache": false,
-    "cache_level": "bypass"
+    "cache": {{ 'false' if (cache_level_mode | default('bypass')) == 'bypass' else 'true' }},
+    "cache_level": "{{ cache_level_mode | default('bypass') }}"
   },
   "expression": "(http.host eq \"{{ domain }}\")",
-  "description": "Set cache level to bypass for {{ domain }}",
+  "description": "Set cache level to {{ cache_level_mode | default('bypass') }} for {{ domain }}",
   "enabled": true
 }
 
