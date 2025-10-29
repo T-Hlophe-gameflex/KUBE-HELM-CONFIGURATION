@@ -1,7 +1,10 @@
----
-- hosts: localhost
   connection: local
   gather_facts: false
+  pre_tasks:
+    - name: Fail if domain is not provided
+      fail:
+        msg: "domain variable is required to launch this playbook. Please provide it via AWX survey or extra_vars."
+      when: domain is not defined
   tasks:
 
     - name: Debug Cloudflare API token presence (name only, value masked)
@@ -17,6 +20,10 @@
     - name: Create domain (zone) if requested
       when: cf_action == 'create_domain'
       block:
+        - name: Fail if domain variable is not provided for creation
+          fail:
+            msg: "To create a new domain, you must provide the domain name via AWX survey or extra_vars."
+          when: domain is not defined or domain | length == 0
         - name: Create Cloudflare zone
           uri:
             url: "https://api.cloudflare.com/client/v4/zones"
