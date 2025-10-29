@@ -86,17 +86,25 @@
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           loop: "{{ merged_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | dict2items }}"
           register: zone_settings_result
+          when: zone_id is defined and zone_id | length > 0
+          ignore_errors: yes
+          failed_when: false
 
         - name: Track zone settings
           set_fact:
             global_changes: "{{ global_changes + [{'type': 'ZONE_SETTINGS_APPLIED', 'domain': domain, 'settings': standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | list}] }}"
+          when: zone_settings_result is defined
 
         - name: "[GLOBAL LEVEL] Zone Settings Applied: {{ domain }}"
           debug:
             msg:
               - "Standard zone settings configured"
               - "  Domain: {{ domain }}"
-              - "  Settings: always_use_https, min_tls_version=1.2, cache_level={{ cache_level_mode | default('standard') }}, ssl_recommender={{ ssl_tls_recommender | default('enabled') }}"
+              - "  Zone ID: {{ zone_id | default('N/A') }}"
+              - "  Attempted: {{ merged_zone_settings | default({}) | list }}"
+              - "  Success: {{ zone_settings_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', true) | map(attribute='item.key') | list if (zone_settings_result is defined and zone_settings_result.results is defined) else [] }}"
+              - "  Failed: {{ zone_settings_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', false) | map(attribute='item.key') | list if (zone_settings_result is defined and zone_settings_result.results is defined) else [] }}"
+          when: zone_settings_result is defined
 
     - name: Manage DNS record (create/update/delete)
       when: cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
