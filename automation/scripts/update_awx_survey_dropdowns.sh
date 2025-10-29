@@ -187,19 +187,19 @@ update_awx_survey() {
     updated_survey=$(echo "$survey_spec" | jq \
         --arg field "$field_name" \
         --argjson choices "$choices" \
-        '(.spec[] | select(.variable == $field) | .choices) |= $choices')
+        '.spec |= map(if .variable == $field then .choices = $choices else . end)')
     
-    # PUT the updated survey back
-    local update_response
-    update_response=$(curl -s -X POST "http://${AWX_HOST}/api/v2/job_templates/${job_template_id}/survey_spec/" \
+    # POST the updated survey back
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o /dev/null -X POST "http://${AWX_HOST}/api/v2/job_templates/${job_template_id}/survey_spec/" \
         -u "admin:${awx_password}" \
         -H "Content-Type: application/json" \
         -d "$updated_survey")
     
-    if echo "$update_response" | jq -e '.spec' > /dev/null 2>&1; then
+    if [[ "$http_code" == "200" ]]; then
         success "Updated $field_name with $(echo "$choices" | jq -r 'length') choices"
     else
-        error_exit "Failed to update survey: $(echo "$update_response" | jq -r '.detail // "Unknown error"')"
+        error_exit "Failed to update survey: HTTP $http_code"
     fi
 }
 
@@ -241,11 +241,19 @@ main() {
     # Update AWX survey dropdowns
     info "Updating AWX Job Template #${AWX_JOB_TEMPLATE_ID} survey..."
     
-    # Update domain dropdown
-    update_awx_survey "$AWX_JOB_TEMPLATE_ID" "domain" "$domains"
+    # Add [MANUAL_ENTRY] option to domains
+    local domains_with_manual
+    domains_with_manual=$(echo "$domains" | jq '. + ["[MANUAL_ENTRY]"]')
     
-    # Update existing_record_name dropdown
-    update_awx_survey "$AWX_JOB_TEMPLATE_ID" "existing_record_name" "$records"
+    # Add [NONE] option to records
+    local records_with_none
+    records_with_none=$(echo "$records" | jq '["[NONE]"] + .')
+    
+    # Update existing_domain dropdown
+    update_awx_survey "$AWX_JOB_TEMPLATE_ID" "existing_domain" "$domains_with_manual"
+    
+    # Update existing_record dropdown
+    update_awx_survey "$AWX_JOB_TEMPLATE_ID" "existing_record" "$records_with_none"
     
     echo ""
     success "Survey dropdowns updated successfully!"

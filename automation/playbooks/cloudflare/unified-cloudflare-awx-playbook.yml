@@ -10,13 +10,40 @@
     platform_changes: []    # AWX/automation platform updates
   tasks:
 
+    # ============================================================================
+    # RESOLVE DOMAIN AND RECORD NAMES FROM DROPDOWNS OR MANUAL ENTRY
+    # ============================================================================
+    - name: Resolve domain name from dropdown or manual entry
+      set_fact:
+        domain: >-
+          {%- if existing_domain is defined and existing_domain != '[MANUAL_ENTRY]' -%}
+            {{ existing_domain }}
+          {%- elif domain is defined and domain != '' -%}
+            {{ domain }}
+          {%- else -%}
+            undefined
+          {%- endif -%}
+      when: existing_domain is defined or domain is defined
+
+    - name: Resolve record name from dropdown or manual entry
+      set_fact:
+        resolved_record_name: >-
+          {%- if existing_record is defined and existing_record != '[NONE]' -%}
+            {{ existing_record }}
+          {%- elif record_name is defined and record_name != '' -%}
+            {{ record_name }}
+          {%- else -%}
+            
+          {%- endif -%}
+      when: existing_record is defined or record_name is defined
+
     - name: " CLOUDFLARE AUTOMATION - {{ cf_action | upper | default('UNDEFINED') }}"
       debug:
         msg:
           - "════════════════════════════════════════════════════════════════"
           - "  ACTION: {{ cf_action | default('undefined') }}"
           - "  DOMAIN: {{ domain | default('undefined') }}"
-          - "  RECORD: {{ record_name if (record_name is defined and record_name != '') else existing_record_name | default('none') }}"
+          - "  RECORD: {{ resolved_record_name | default('none') }}"
           - "  TYPE: {{ record_type | default('n/a') }}"
           - "════════════════════════════════════════════════════════════════"
 
@@ -159,10 +186,9 @@
 
         # ========== End of Modern Rules Section ==========
 
-        - name: Set effective record name (from new text input or existing dropdown)
+        - name: Use resolved record name for DNS operations
           set_fact:
-            effective_record_name: >-
-              {{ existing_record_name if (existing_record_name is defined and existing_record_name != 'none' and existing_record_name|length > 0) else (record_name if (record_name is defined and record_name|length > 0) else '') }}
+            effective_record_name: "{{ resolved_record_name | default('') }}"
 
         - name: Trim and normalize effective_record_name (strip quotes, collapse spaces)
           set_fact:

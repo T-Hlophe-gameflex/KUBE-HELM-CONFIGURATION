@@ -1,7 +1,0 @@
----
-- hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: noop placeholder for global-workflow (archived)
-      debug:
-        msg: "Placeholder playbook for global-workflow.yml (archived). See automation/archive/ for original."
