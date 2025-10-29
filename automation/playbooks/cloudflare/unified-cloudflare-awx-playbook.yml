@@ -15,22 +15,26 @@
     # ============================================================================
     - name: Resolve domain name from dropdown or manual entry
       set_fact:
-        domain: >-
-          {%- if existing_domain is defined and existing_domain != '[MANUAL_ENTRY]' and existing_domain != '' -%}
-            {{ existing_domain }}
-          {%- elif domain is defined and domain != '' and domain != 'undefined' -%}
-            {{ domain }}
+        resolved_domain: >-
+          {%- if existing_domain is defined and (existing_domain | trim) != '' and (existing_domain | trim) != '[MANUAL_ENTRY]' -%}
+            {{ existing_domain | trim }}
+          {%- elif domain is defined and (domain | trim) != '' -%}
+            {{ domain | trim }}
           {%- else -%}
-            undefined
+            
           {%- endif -%}
+
+    - name: Store original record name input (before resolution)
+      set_fact:
+        record_name_manual_input: "{{ record_name | default('') }}"
 
     - name: Resolve record name from dropdown or manual entry
       set_fact:
         resolved_record_name: >-
-          {%- if existing_record is defined and existing_record != '[NONE]' and existing_record != '' -%}
-            {{ existing_record }}
-          {%- elif record_name is defined and record_name != '' -%}
-            {{ record_name }}
+          {%- if existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' -%}
+            {{ existing_record | trim }}
+          {%- elif record_name_manual_input is defined and (record_name_manual_input | trim) != '' -%}
+            {{ record_name_manual_input | trim }}
           {%- else -%}
             
           {%- endif -%}
@@ -40,7 +44,7 @@
         msg:
           - "════════════════════════════════════════════════════════════════"
           - "  ACTION: {{ cf_action | default('undefined') }}"
-          - "  DOMAIN: {{ domain | default('undefined') }}"
+          - "  DOMAIN: {{ resolved_domain | default('undefined') }}"
           - "  RECORD: {{ resolved_record_name | default('none') }}"
           - "  TYPE: {{ record_type | default('n/a') }}"
           - "════════════════════════════════════════════════════════════════"
@@ -57,7 +61,7 @@
               Content-Type: "application/json"
             body_format: json
             body:
-              name: "{{ domain }}"
+              name: "{{ resolved_domain }}"
               jump_start: true
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
@@ -68,11 +72,11 @@
             domain_changes: "{{ domain_changes + [{'type': 'ZONE_CREATED', 'domain': domain, 'zone_id': create_zone_result.json.result.id | default('N/A'), 'status': 'SUCCESS' if create_zone_result.json.success else 'FAILED'}] }}"
           when: create_zone_result.json is defined
 
-        - name: "[DOMAIN LEVEL] Zone Created: {{ domain }}"
+        - name: "[DOMAIN LEVEL] Zone Created: {{ resolved_domain }}"
           debug:
             msg:
               - "New Cloudflare Zone Created"
-              - "  Domain: {{ domain }}"
+              - "  Domain: {{ resolved_domain }}"
               - "  Zone ID: {{ create_zone_result.json.result.id | default('N/A') }}"
               - "  Status: {{ create_zone_result.json.result.status | default('N/A') }}"
           when: create_zone_result.json.success | default(false)
@@ -86,7 +90,7 @@
       block:
         - name: Get zone ID for domain
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
             method: GET
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
@@ -125,11 +129,11 @@
             global_changes: "{{ global_changes + [{'type': 'ZONE_SETTINGS_APPLIED', 'domain': domain, 'settings': standard_zone_settings | default({'always_use_https': true, 'min_tls_version': '1.2', 'cache_level': 'standard'}) | list}] }}"
           when: zone_settings_result is defined
 
-        - name: "[GLOBAL LEVEL] Zone Settings Applied: {{ domain }}"
+        - name: "[GLOBAL LEVEL] Zone Settings Applied: {{ resolved_domain }}"
           debug:
             msg:
               - "Standard zone settings configured"
-              - "  Domain: {{ domain }}"
+              - "  Domain: {{ resolved_domain }}"
               - "  Zone ID: {{ zone_id | default('N/A') }}"
               - "  Attempted: {{ merged_zone_settings | default({}) | list }}"
               - "  Success: {{ zone_settings_result.results | selectattr('json.success', 'defined') | selectattr('json.success', 'equalto', true) | map(attribute='item.key') | list if (zone_settings_result is defined and zone_settings_result.results is defined) else [] }}"
@@ -145,7 +149,7 @@
       block:
         - name: Get zone ID for domain
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
             method: GET
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
@@ -217,7 +221,7 @@
                 {% if effective_record_name | regex_search('\.' ~ domain ~ '$') %}
                   {{ effective_record_name | trim }}
                 {% elif effective_record_name == '@' %}
-                  {{ domain }}
+                  {{ resolved_domain }}
                 {% else %}
                   {{ (effective_record_name | trim) ~ '.' ~ domain }}
                 {% endif %}
@@ -227,7 +231,7 @@
 
         - name: "[DOMAIN LEVEL] DNS Record Operation"
           debug:
-            msg: "{{ cf_action | upper }}: {{ fq_record_name | default(effective_record_name) }} ({{ record_type }}) on {{ domain }}"
+            msg: "{{ cf_action | upper }}: {{ fq_record_name | default(effective_record_name) }} ({{ record_type }}) on {{ resolved_domain }}"
           when: cf_action in ['create_record','update_record','delete_record','clone_record']
 
         - name: Clone record (if requested)
@@ -643,7 +647,7 @@
         - name: "[DOMAIN LEVEL] Zone Configuration"
           debug:
             msg: >-
-              Domain: {{ domain }} | Zone ID: {{ zone_id | default('N/A') }} | Modern Rules: {{ rule_actions_to_apply | default([]) | length }}
+              Domain: {{ resolved_domain }} | Zone ID: {{ zone_id | default('N/A') }} | Modern Rules: {{ rule_actions_to_apply | default([]) | length }}
 
         - name: Domain zone setting - {{ item.item.key }}
           debug:
@@ -673,7 +677,7 @@
           ============================================================
           
           Action: {{ cf_action | upper | default('NONE') }}
-          Domain: {{ domain | default('N/A') }}
+          Domain: {{ resolved_domain | default('N/A') }}
           
           [DOMAIN LEVEL] Changes: {{ domain_changes | length }} operation(s)
           {% for change in domain_changes %}
