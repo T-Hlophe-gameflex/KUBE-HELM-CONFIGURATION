@@ -1,3 +1,0 @@
----
-# Default variables for Cloudflare playbooks
-dry_run: true

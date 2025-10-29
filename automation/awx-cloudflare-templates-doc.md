@@ -1,9 +1,0 @@
-# AWX/Cloudflare Templates Documentation
-
-| Template/Playbook              | Purpose                                                        | Main Features                                                                                       |
-|-------------------------------|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| **manage-record.yml**          | Manages Cloudflare DNS records (CRUD) safely and idempotently. | - Normalizes inputs (dry-run, TTL, proxied flags)<br>- Auto-expands short record names to FQDN for deletes<br>- Uses Cloudflare API token from env or variable<br>- Asserts required parameters<br>- Supports dry-run mode |
-| **global-standardize.yml**     | Enforces global record defaults (TTL, proxied) across domains.  | - Loads standardization targets from template<br>- Updates records to match global defaults<br>- Logs changes and reports when no updates needed<br>- Skips updates in dry-run mode |
-| **domain-standardize.yml**     | Aligns zone-level settings across managed domains.              | - Applies standard zone settings via Cloudflare API<br>- Reports when no settings defined<br>- Logs changes for audit<br>- Skips updates in dry-run mode |
-| **platform-sync.yml**          | Clones standard DNS records across domains for consistency.     | - Determines record keys to sync<br>- Validates keys in standard profile<br>- Loads sync targets from template<br>- Applies synchronization per target<br>- Error handling and skips if no valid targets |
-| **sync-governance-template.yml** | Synchronizes and updates AWX job template surveys for governance. | - Looks up AWX job template metadata via API<br>- Fetches and updates survey specification<br>- Applies field overrides<br>- Persists updates to AWX (skips in dry-run)<br>- Tracks updated templates for reporting |
