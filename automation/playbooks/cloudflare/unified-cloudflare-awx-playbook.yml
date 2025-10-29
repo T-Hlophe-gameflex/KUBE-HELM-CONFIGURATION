@@ -799,6 +799,7 @@
                     'ttl': (numeric_ttl|int if numeric_ttl is defined else 3600) }
                  )
                  | combine({'proxied': (effective_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
+                 | combine({'priority': (record_priority|int if record_priority is defined else 10)} if record_type in ['MX','SRV'] else {})
                  | to_json }}
           when: not record_payload_template_stat.stat.exists and record_type is defined and cf_action in ['create_record','update_record','clone_record']
 

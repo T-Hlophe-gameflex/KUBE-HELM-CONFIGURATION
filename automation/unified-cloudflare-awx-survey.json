@@ -78,6 +78,16 @@
     "max": 2147483647
   },
   {
+    "question_name": "Record Priority",
+    "question_description": "Priority for MX and SRV records (lower = higher priority, default: 10)",
+    "required": false,
+    "type": "integer",
+    "variable": "record_priority",
+    "default": 10,
+    "min": 0,
+    "max": 65535
+  },
+  {
     "question_name": "Proxy Status",
     "question_description": "Enable Cloudflare proxy (orange cloud) - only for A, AAAA, CNAME records",
     "required": false,
