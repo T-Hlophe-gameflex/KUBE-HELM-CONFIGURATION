@@ -73,6 +73,7 @@
   when: ruleset_id == 'create_new'
   register: new_ruleset
   ignore_errors: yes
+  failed_when: false
 
 - name: Update ruleset_id if new one was created
   set_fact:
@@ -101,6 +102,7 @@
     - rule_payload.error is not defined
   register: rule_create_result
   ignore_errors: yes
+  failed_when: false
 
 - name: "[DOMAIN LEVEL] Modern rule: {{ current_rule_action }}"
   debug:

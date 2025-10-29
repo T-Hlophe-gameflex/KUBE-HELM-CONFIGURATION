@@ -659,3 +659,27 @@
           {% endfor %}
           
           ============================================================
+
+    # ============================================================================
+    # AUTO-UPDATE AWX SURVEY DROPDOWNS (Post-execution hook)
+    # ============================================================================
+    - name: Update AWX survey dropdowns with latest domains and records
+      shell: "{{ playbook_dir }}/../../scripts/update_awx_survey_dropdowns.sh"
+      environment:
+        CLOUDFLARE_API_TOKEN: "{{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+        AWX_HOST: "{{ lookup('env','AWX_HOST') | default('localhost:8052', true) }}"
+        AWX_JOB_TEMPLATE_ID: "{{ lookup('env','AWX_JOB_TEMPLATE_ID') | default('21', true) }}"
+      when: 
+        - cf_action in ['create_domain', 'create_record']
+        - auto_update_survey | default(true) | bool
+      ignore_errors: yes
+      failed_when: false
+      register: survey_update_result
+
+    - name: "[PLATFORM LEVEL] Survey Dropdowns Updated"
+      debug:
+        msg: "AWX survey dropdowns automatically refreshed with latest Cloudflare data"
+      when: 
+        - survey_update_result is defined
+        - survey_update_result.rc is defined
+        - survey_update_result.rc == 0
