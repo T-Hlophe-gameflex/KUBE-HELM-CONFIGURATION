@@ -137,13 +137,13 @@
             - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
             - zone_id is defined and zone_id | length > 0
           block:
-            - name: Set default rule_action to 'all' if not specified
+            - name: Set default survey_rule_action to 'all' if not specified
               set_fact:
-                rule_action: "{{ rule_action | default('all') }}"
+                survey_rule_action: "{{ rule_action | default('all') }}"
 
             - name: Set rule actions list (expand 'all' to individual rules)
               set_fact:
-                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_level', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if rule_action == 'all' else ([rule_action] if rule_action != 'none' else []) }}"
+                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_level', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] if survey_rule_action == 'all' else ([survey_rule_action] if survey_rule_action != 'none' else []) }}"
 
             - name: Apply each rule action
               include_tasks: "../tasks/apply_single_modern_rule.yml"

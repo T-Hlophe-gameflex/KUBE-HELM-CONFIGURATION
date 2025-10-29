@@ -7,6 +7,10 @@
   set_fact:
     rule_action: "{{ current_rule_action }}"
 
+- name: Debug - Show rule_action being processed
+  debug:
+    msg: "Processing rule: {{ rule_action }} (from current_rule_action: {{ current_rule_action }})"
+
 - name: Generate rule configuration from template for {{ current_rule_action }}
   set_fact:
     rule_payload: "{{ lookup('template', '../../templates/cloudflare_modern_rules.j2') | from_json }}"
