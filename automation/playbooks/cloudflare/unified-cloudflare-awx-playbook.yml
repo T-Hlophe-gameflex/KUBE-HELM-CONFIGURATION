@@ -84,9 +84,9 @@
     - name: Standardize domain settings (always runs after create_domain or on demand)
       when: 
         - cf_action in ['create_domain', 'standardize', 'sync', 'create_record']
-        - domain is defined
-        - domain != 'undefined'
-        - domain | length > 0
+        - resolved_domain is defined
+        - resolved_domain != 'undefined'
+        - resolved_domain | length > 0
       block:
         - name: Get zone ID for domain
           uri:
@@ -143,9 +143,9 @@
     - name: Manage DNS record (create/update/delete)
       when: 
         - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
-        - domain is defined
-        - domain != 'undefined'
-        - domain | length > 0
+        - resolved_domain is defined
+        - resolved_domain != 'undefined'
+        - resolved_domain | length > 0
       block:
         - name: Get zone ID for domain
           uri:
@@ -217,21 +217,21 @@
         - name: Build fully-qualified record name (append domain if needed)
           set_fact:
             fq_record_name: >-
-              {% if effective_record_name is defined and effective_record_name | length > 0 %}
-                {% if effective_record_name | regex_search('\.' ~ domain ~ '$') %}
-                  {{ effective_record_name | trim }}
-                {% elif effective_record_name == '@' %}
-                  {{ resolved_domain }}
-                {% else %}
-                  {{ (effective_record_name | trim) ~ '.' ~ domain }}
-                {% endif %}
-              {% else %}
-                ''
-              {% endif %}
+              {%- if effective_record_name is defined and effective_record_name | length > 0 -%}
+              {%- if effective_record_name | regex_search('\.' ~ resolved_domain ~ '$') -%}
+              {{ effective_record_name | trim }}
+              {%- elif effective_record_name == '@' -%}
+              {{ resolved_domain }}
+              {%- else -%}
+              {{ (effective_record_name | trim) ~ '.' ~ resolved_domain }}
+              {%- endif -%}
+              {%- else -%}
+              
+              {%- endif -%}
 
         - name: "[DOMAIN LEVEL] DNS Record Operation"
           debug:
-            msg: "{{ cf_action | upper }}: {{ fq_record_name | default(effective_record_name) }} ({{ record_type }}) on {{ resolved_domain }}"
+            msg: "{{ cf_action | upper }}: {{ fq_record_name | default(effective_record_name) }} ({{ record_type | default('ANY') }}) on {{ resolved_domain }}"
           when: cf_action in ['create_record','update_record','delete_record','clone_record']
 
         - name: Clone record (if requested)
@@ -357,14 +357,14 @@
 
         - name: Find existing record (if any)
           uri:
-            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?type={{ record_type }}&name={{ fq_record_name | urlencode }}"
+            url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?{% if record_type is defined %}type={{ record_type }}&{% endif %}name={{ fq_record_name | urlencode }}"
             method: GET
             headers:
               Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
             return_content: true
             validate_certs: "{{ cf_validate_certs | default(true) }}"
           register: record_lookup
-          when: (record_id is not defined or record_id == '') and record_type is defined and fq_record_name is defined and fq_record_name | length > 0
+          when: (record_id is not defined or record_id == '') and fq_record_name is defined and fq_record_name | length > 0
         - name: Set record_id from API lookup if available
           set_fact:
             record_id: "{{ record_lookup.json.result[0].id }}"
@@ -462,7 +462,12 @@
         - name: Validate CNAME target is not an IP address
           fail:
             msg: "CNAME record value looks like an IP ({{ record_value }}). CNAME must point to a hostname or FQDN. Use A/AAAA for IP addresses."
-          when: record_type == 'CNAME' and (record_value is defined and record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$'))
+          when:
+            - cf_action in ['create_record', 'update_record']
+            - record_type is defined
+            - record_type == 'CNAME'
+            - record_value is defined
+            - record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$')
 
         - name: Fallback to curl if uri call failed
           shell: >-
@@ -615,12 +620,12 @@
               {% if success %}[SUCCESS] {{ cf_action | replace('_', ' ') | title }}: {{ fq_record_name }} ({{ record_type }}){% else %}[FAILED] {{ cf_action | replace('_', ' ') | title }}: {{ fq_record_name }} - {{ (record_result.json.errors | map(attribute='message') | join(', ') if (record_result is defined and record_result.json is defined and record_result.json.errors is defined) else 'Unknown error') }}{% endif %}
               {% elif cf_action == 'delete_record' %}
               {% set success = (delete_result.json.success if (delete_result is defined and delete_result.json is defined and delete_result.json.success is defined) else false) %}
-              {% if success %}[SUCCESS] Deleted: {{ fq_record_name }} ({{ record_type }}){% else %}[FAILED] Delete failed: {{ fq_record_name }}{% endif %}
+              {% if success %}[SUCCESS] Deleted: {{ fq_record_name }}{% if record_type is defined %} ({{ record_type }}){% endif %}{% else %}[FAILED] Delete failed: {{ fq_record_name }}{% endif %}
               {% else %}[SKIPPED] No action performed{% endif %}
 
         - name: Track domain level changes
           set_fact:
-            domain_changes: "{{ domain_changes + [{'action': cf_action, 'record': fq_record_name, 'type': record_type, 'status': 'success' if (record_result.json.success | default(false) or delete_result.json.success | default(false)) else 'failed'}] }}"
+            domain_changes: "{{ domain_changes + [{'action': cf_action, 'record': fq_record_name, 'type': record_type | default('ANY'), 'status': 'success' if (record_result.json.success | default(false) or delete_result.json.success | default(false)) else 'failed'}] }}"
           when: cf_action in ['create_record','update_record','delete_record']
 
     - name: Sync platform records (apply standard records to all domains)
@@ -642,7 +647,7 @@
             loop_var: zone
 
     - name: Output domain settings summary (structured)
-      when: domain is defined and domain|length > 0
+      when: resolved_domain is defined and resolved_domain|length > 0
       block:
         - name: "[DOMAIN LEVEL] Zone Configuration"
           debug:
