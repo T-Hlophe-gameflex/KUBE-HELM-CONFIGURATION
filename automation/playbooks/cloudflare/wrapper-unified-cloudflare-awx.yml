@@ -174,3 +174,6 @@
     - name: Output summary of all actions
       debug:
         msg: "Unified playbook completed. See above for detailed results."
+
+    - name: Include page rules tasks
+      include_tasks: tasks/page_rules.yml

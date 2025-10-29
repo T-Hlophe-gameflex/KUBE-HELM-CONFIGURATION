@@ -1,0 +1,76 @@
+---
+- name: Determine which page rules to apply
+  set_fact:
+    selected_page_rules: >-
+      {% if page_rule_selection == 'all' %}
+        {{ available_page_rules }}
+      {% else %}
+        {{ available_page_rules | selectattr('name', 'equalto', page_rule_selection) | list }}
+      {% endif %}
+
+- name: Optionally fetch page rules from another domain
+  when: source_domain_for_rules is defined and source_domain_for_rules|length > 0
+  block:
+    - name: Get zone ID for source domain
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones?name={{ source_domain_for_rules }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+          Content-Type: "application/json"
+        return_content: true
+        validate_certs: false
+      register: source_zone_lookup
+
+    - name: Get page rules from source domain
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ source_zone_lookup.json.result[0].id }}/pagerules"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+          Content-Type: "application/json"
+        return_content: true
+        validate_certs: false
+      register: source_page_rules_lookup
+
+    - name: Set selected_page_rules from source domain
+      set_fact:
+        selected_page_rules: "{{ source_page_rules_lookup.json.result }}"
+
+- name: Get zone ID for target domain
+  uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+      Content-Type: "application/json"
+    return_content: true
+    validate_certs: false
+  register: target_zone_lookup
+
+- name: Apply selected page rules to target domain
+  loop: "{{ selected_page_rules }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed rule') }}"
+  uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ target_zone_lookup.json.result[0].id }}/pagerules"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      targets:
+        - target: "url"
+          constraint:
+            operator: "matches"
+            value: "{{ domain }}/*"
+      actions: "{{ item.actions }}"
+      status: "active"
+    return_content: true
+    validate_certs: false
+  register: page_rule_apply_result
+
+- name: Output page rule application result
+  debug:
+    var: page_rule_apply_result
