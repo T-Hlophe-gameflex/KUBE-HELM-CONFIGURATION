@@ -1,7 +1,19 @@
----
-- hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    available_page_rules:
+      - name: "Browser TTL"
+        actions:
+          - id: "browser_cache_ttl"
+            value: 7200
+      - name: "Always Use HTTPS"
+        actions:
+          - id: "forwarding_url"
+            value:
+              url: "https://{{ domain }}"
+              status_code: 301
+    page_rule_selection: "all"  # AWX survey variable: 'Browser TTL', 'Always Use HTTPS', or 'all'
+    source_domain_for_rules: ""  # AWX survey variable for cross-domain rule application
   pre_tasks:
     - name: Set domain variable from new_domain if not provided
       set_fact:
