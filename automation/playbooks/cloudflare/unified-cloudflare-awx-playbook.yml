@@ -683,9 +683,9 @@
                 headers:
                   Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
                   Content-Type: "application/json"
-                # send raw JSON payload from rendered file
-                body_format: raw
-                body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') }}"
+                # Read JSON file and send as properly formatted JSON
+                body_format: json
+                body: "{{ lookup('file', '/tmp/clone_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
                 return_content: true
                 validate_certs: "{{ cf_validate_certs | default(true) }}"
               when: not (cf_force_curl | default(false) | bool)
@@ -1081,7 +1081,7 @@
             set -e
             
             CLOUDFLARE_API_TOKEN="{{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            AWX_TOKEN="{{ lookup('env','AWX_TOKEN') | default('e5VRSZHAwWshxPYbKjc5p3I0zmc1T9') }}"
+            AWX_TOKEN="e5VRSZHAwWshxPYbKjc5p3I0zmc1T9"
             AWX_URL="http://127.0.0.1:8052"
             TEMPLATE_ID="21"
             
@@ -1125,7 +1125,7 @@
             set -e
             
             CLOUDFLARE_API_TOKEN="{{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-            AWX_TOKEN="{{ lookup('env','AWX_TOKEN') | default('e5VRSZHAwWshxPYbKjc5p3I0zmc1T9') }}"
+            AWX_TOKEN="e5VRSZHAwWshxPYbKjc5p3I0zmc1T9"
             AWX_URL="http://127.0.0.1:8052"
             TEMPLATE_ID="21"
             
