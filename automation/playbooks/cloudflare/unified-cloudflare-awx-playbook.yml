@@ -3,10 +3,14 @@
   connection: local
   gather_facts: false
   pre_tasks:
+    - name: Set domain variable from new_domain if not provided
+      set_fact:
+        domain: "{{ domain | default(new_domain | default('')) }}"
+      when: domain is not defined and new_domain is defined
     - name: Fail if domain is not provided
       fail:
         msg: "domain variable is required to launch this playbook. Please provide it via AWX survey or extra_vars."
-      when: domain is not defined
+      when: domain is not defined or domain | length == 0
   tasks:
 
     - name: Debug Cloudflare API token presence (name only, value masked)
