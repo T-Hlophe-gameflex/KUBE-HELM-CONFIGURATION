@@ -90,22 +90,23 @@
   register: rule_create_result
   ignore_errors: yes
 
-- name: Display modern rule creation result for {{ current_rule_action }}
+- name: "[DOMAIN LEVEL] Modern rule: {{ current_rule_action }}"
   debug:
     msg: >-
       {% if rule_create_result is defined and rule_create_result.json is defined and rule_create_result.json.success | default(false) %}
-      ✓ Modern Cloudflare Rule created successfully!
+      [SUCCESS] Modern Cloudflare Rule created
         Action: {{ current_rule_action }}
         Phase: {{ ruleset_phase }}
         Ruleset ID: {{ ruleset_id }}
         Rule ID: {{ rule_create_result.json.result.id | default('N/A') }}
         Description: {{ rule_payload.description | default('N/A') }}
       {% elif rule_create_result is defined and rule_create_result.json is defined and not (rule_create_result.json.success | default(false)) %}
-      ✗ Modern Rule creation failed!
+      [FAILED] Modern Rule creation failed
         Action: {{ current_rule_action }}
         Errors: {{ rule_create_result.json.errors | default([]) | map(attribute='message') | join(', ') }}
       {% elif rule_payload is defined and rule_payload.error is defined %}
-      ✗ Rule template error: {{ rule_payload.error }}
+      [ERROR] Rule template error: {{ rule_payload.error }}
       {% else %}
-      ⊘ Rule creation skipped (zone_id: {{ zone_id | default('missing') }}, rule_action: {{ current_rule_action | default('missing') }})
+      [SKIPPED] Rule creation skipped (zone_id: {{ zone_id | default('missing') }}, rule_action: {{ current_rule_action | default('missing') }})
       {% endif %}
+
