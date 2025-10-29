@@ -173,6 +173,8 @@
               {{ (all_records_lookup.json.result | map(attribute='name') | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
             records_list_objects: >-
               {{ (all_records_lookup.json.result | map(attribute=None) | map('combine', {}) | list) if (all_records_lookup is defined and all_records_lookup.json is defined and all_records_lookup.json.result|length > 0) else [] }}
+            page_rules_list: >-
+              {{ (available_page_rules | map(attribute='name') | list) + ['all'] }}
 
         - name: Write dropdown files to project (domains and records) when enabled
           block:
@@ -198,6 +200,12 @@
               copy:
                 content: "{{ records_list_objects | to_json }}"
                 dest: "{{ playbook_dir }}/awx_dropdowns/records_{{ domain }}.objects.json"
+                mode: '0644'
+
+            - name: Write page rules list JSON
+              copy:
+                content: "{{ page_rules_list | to_json }}"
+                dest: "{{ playbook_dir }}/awx_dropdowns/page_rules.json"
                 mode: '0644'
 
             - name: Optionally commit & push dropdown files to repo
@@ -243,7 +251,9 @@
                     {% if q.variable == 'selected_domain' %}
                       {% set _ = q.update({'choices': (domains_list | join(','))}) %}
                     {% elif q.variable == 'selected_record_name' %}
-                      {% set _ = q.update({'choices': (records_list | join(','))}) %}
+                      {% set _ = q.update({'choices': (records_list_names | join(','))}) %}
+                    {% elif q.variable == 'page_rule_selection' %}
+                      {% set _ = q.update({'choices': (page_rules_list | join(','))}) %}
                     {% endif %}
                   {% endfor %}
                   {{ spec }}
