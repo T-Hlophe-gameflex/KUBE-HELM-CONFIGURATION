@@ -23,7 +23,65 @@
     - name: Fail if domain is not provided
       fail:
         msg: "domain variable is required to launch this playbook. Please provide it via AWX survey or extra_vars."
-      when: domain is not defined or domain | length == 0
+      when: (domain is not defined or domain | length == 0) and not (update_awx_surveys | default(false))
+
+  # If user only wants to update AWX surveys (dropdowns), do that first and stop the play.
+    - name: Update AWX survey_spec for page_rule_selection and exit early
+      when: update_awx_surveys | default(false) and awx_api_url is defined and awx_token is defined and awx_job_template_id is defined
+      block:
+        - name: Build page_rules_list for survey
+          set_fact:
+            page_rules_list: "{{ (available_page_rules | map(attribute='name') | list) + ['all'] }}"
+
+        - name: Get current AWX job template
+          uri:
+            url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ awx_token }}"
+              Content-Type: "application/json"
+            return_content: true
+            validate_certs: "{{ awx_validate_certs | default(true) }}"
+          register: awx_job_template
+
+        - name: Build updated survey_spec with page_rule_selection choices
+          set_fact:
+            awx_survey_spec: >-
+              {% set spec = awx_job_template.json.survey_spec if awx_job_template.json.survey_spec is defined else {'name': 'Survey','spec': []} %}
+              {% set questions = spec.spec | default([]) %}
+              {% set found = false %}
+              {% for q in questions %}
+                {% if q.variable == 'page_rule_selection' %}
+                  {% set _ = q.update({'choices': (page_rules_list | join(','))}) %}
+                  {% set found = true %}
+                {% endif %}
+              {% endfor %}
+              {% if not found %}
+                {% set _ = questions.append({'question_name': 'Page Rule Selection', 'question_description': 'Choose which named page rules to apply', 'required': True, 'type': 'multiplechoice', 'variable': 'page_rule_selection', 'choices': (page_rules_list | join(',')), 'default': 'all'}) %}
+              {% endif %}
+              {{ {'name': spec.name, 'spec': questions} }}
+
+        - name: Patch AWX job template with updated survey_spec
+          uri:
+            url: "{{ awx_api_url | trim('/') }}/api/v2/job_templates/{{ awx_job_template_id }}"
+            method: PATCH
+            headers:
+              Authorization: "Bearer {{ awx_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              survey_enabled: true
+              survey_spec: "{{ awx_survey_spec }}"
+            return_content: true
+            validate_certs: "{{ awx_validate_certs | default(true) }}"
+          register: awx_patch_result
+
+        - name: Show AWX patch result
+          debug:
+            var: awx_patch_result.json
+
+        - name: End play after updating AWX surveys
+          meta: end_play
   tasks:
     # ...existing code...
 
