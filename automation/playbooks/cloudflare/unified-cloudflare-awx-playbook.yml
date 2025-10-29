@@ -26,6 +26,9 @@
   tasks:
     # ...existing code...
 
+    - name: Include page rules tasks
+      include_tasks: tasks/page_rules.yml
+
     - name: Determine which page rules to apply
       set_fact:
         selected_page_rules: >-
