@@ -1,7 +1,0 @@
----
-- hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: noop placeholder for test-cloudflare (archived)
-      debug:
-        msg: "Placeholder playbook for test-cloudflare.yml (archived). See automation/archive/ for original."
