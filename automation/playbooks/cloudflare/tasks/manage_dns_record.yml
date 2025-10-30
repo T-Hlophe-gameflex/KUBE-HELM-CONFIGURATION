@@ -26,6 +26,8 @@
         source_record_name: >-
           {%- if existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' and (existing_record | trim) != '[REFRESH_NEEDED]' -%}
             {{ existing_record | trim }}
+          {%- elif record_value is defined and (record_value | trim) != '' and (existing_record | trim) == '[NONE]' -%}
+            {{ record_value | trim }}
           {%- elif record_name is defined and (record_name | trim) != '' -%}
             {{ record_name | trim }}
           {%- else -%}
@@ -124,7 +126,7 @@
     - name: Prevent cloning to identical record
       fail:
         msg: |
-          ❌ CLONE OPERATION FAILED - CANNOT CLONE TO IDENTICAL RECORD!
+          CLONE OPERATION FAILED - CANNOT CLONE TO IDENTICAL RECORD!
           
           Source: {{ found_source_record.name | default('N/A') }} in {{ source_domain | default('N/A') }}
           Target: {{ fq_record_name }} in {{ resolved_domain }}
@@ -144,7 +146,7 @@
     - name: Display successful auto-discovery
       debug:
         msg:
-          - "✅ AUTO-DISCOVERY SUCCESSFUL!"
+          - "  AUTO-DISCOVERY SUCCESSFUL!"
           - "  Source domain found: {{ source_domain | default('NOT FOUND') }}"
           - "  Source record: {{ found_source_record.name | default('N/A') }}"
           - "  Source content: {{ found_source_record.content | default('N/A') }}"
@@ -209,7 +211,7 @@
     - name: Fail if clone operation failed
       fail:
         msg: |
-          ❌ CLONE OPERATION FAILED!
+          CLONE OPERATION FAILED!
           
           Error: {{ clone_result.json.errors[0].message | default('Unknown error') if clone_result.json.errors is defined else 'API request failed' }}
           Code: {{ clone_result.json.errors[0].code | default('N/A') if clone_result.json.errors is defined else 'N/A' }}
