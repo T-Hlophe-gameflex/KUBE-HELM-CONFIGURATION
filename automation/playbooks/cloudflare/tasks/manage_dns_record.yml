@@ -73,7 +73,7 @@
         - source_record_name is defined and source_record_name | length > 0
       failed_when: false
 
-    - name: Find domain containing the record
+    - name: Find domain containing the record (prefer different domain than target)
       set_fact:
         source_domain: "{{ item.item.name }}"
         source_zone_id: "{{ item.item.id }}"
@@ -83,6 +83,21 @@
         - record_search_results is defined
         - item.json is defined 
         - item.json.result | length > 0
+        - item.item.name != resolved_domain  # Prefer source from different domain than target
+      loop_control:
+        loop_var: item
+
+    - name: Fallback - use any domain if no different domain found
+      set_fact:
+        source_domain: "{{ item.item.name }}"
+        source_zone_id: "{{ item.item.id }}"
+        found_source_record: "{{ item.json.result[0] if item.json.result | length > 0 else {} }}"
+      loop: "{{ record_search_results.results | default([]) }}"
+      when: 
+        - record_search_results is defined
+        - item.json is defined 
+        - item.json.result | length > 0
+        - source_domain is not defined  # Only if we haven't found a source yet
       loop_control:
         loop_var: item
 
@@ -103,6 +118,26 @@
       when: 
         - source_domain is not defined or source_domain | length == 0
         - source_record_name is defined and source_record_name | length > 0
+
+    - name: Prevent cloning to identical record
+      fail:
+        msg: |
+          ❌ CLONE OPERATION FAILED - CANNOT CLONE TO IDENTICAL RECORD!
+          
+          Source: {{ found_source_record.name | default('N/A') }} in {{ source_domain | default('N/A') }}
+          Target: {{ fq_record_name }} in {{ resolved_domain }}
+          
+          Cannot clone a record to itself. The source and target are identical.
+          
+          Please either:
+          1. Use a different target record name (new_record_name)
+          2. Clone from a different source domain
+      when: 
+        - source_domain is defined
+        - found_source_record is defined
+        - found_source_record.name is defined
+        - source_domain == resolved_domain
+        - found_source_record.name == fq_record_name
       
     - name: Display successful auto-discovery
       debug:
