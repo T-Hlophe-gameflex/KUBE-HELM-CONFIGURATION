@@ -101,8 +101,8 @@ apply_survey() {
           "required": true,
           "type": "multiplechoice",
           "variable": "existing_domain",
-          "choices": ["efustryton.co.za", "efutechnologies.co.za", "[MANUAL_ENTRY]"],
-          "default": "efutechnologies.co.za"
+          "choices": ["[MANUAL_ENTRY]"],
+          "default": "[MANUAL_ENTRY]"
         },
         {
           "question_name": "Manual Domain Entry",
@@ -360,27 +360,42 @@ fetch_cloudflare_domains() {
 fetch_cloudflare_records() {
     echo "📋 Fetching DNS records from all zones..."
     
-    # Get zone IDs
-    ZONE_IDS=$(echo "$DOMAINS_RESPONSE" | jq -r '.result[].id')
+    # Get zone IDs and domain names for processing
+    ZONE_DATA=$(echo "$DOMAINS_RESPONSE" | jq -r '.result[] | "\(.id)|\(.name)"')
     ALL_RECORDS='[]'
     
-    while IFS= read -r zone_id; do
-        if [[ -n "$zone_id" ]]; then
+    while IFS='|' read -r zone_id domain_name; do
+        if [[ -n "$zone_id" && -n "$domain_name" ]]; then
             RECORDS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
                 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
                 -H "Content-Type: application/json")
             
             if [[ $(echo "$RECORDS_RESPONSE" | jq -r '.success') == "true" ]]; then
-                # Extract record names and merge with existing
+                # Extract record names and strip domain part
                 ZONE_RECORDS=$(echo "$RECORDS_RESPONSE" | jq -r '.result[].name')
-                while IFS= read -r record_name; do
-                    if [[ -n "$record_name" ]]; then
-                        ALL_RECORDS=$(echo "$ALL_RECORDS" | jq ". + [\"$record_name\"]")
+                while IFS= read -r full_record_name; do
+                    if [[ -n "$full_record_name" ]]; then
+                        # Strip domain part - get only the subdomain/record name
+                        if [[ "$full_record_name" == "$domain_name" ]]; then
+                            # Root domain record - use "@"
+                            record_name="@"
+                        elif [[ "$full_record_name" == *".$domain_name" ]]; then
+                            # Subdomain - strip the domain part
+                            record_name="${full_record_name%.$domain_name}"
+                        else
+                            # Edge case - use full name
+                            record_name="$full_record_name"
+                        fi
+                        
+                        # Add to records array if not empty
+                        if [[ -n "$record_name" ]]; then
+                            ALL_RECORDS=$(echo "$ALL_RECORDS" | jq ". + [\"$record_name\"]")
+                        fi
                     fi
                 done <<< "$ZONE_RECORDS"
             fi
         fi
-    done <<< "$ZONE_IDS"
+    done <<< "$ZONE_DATA"
     
     # Remove duplicates, sort, and add default options
     CLOUDFLARE_RECORDS=$(echo "$ALL_RECORDS" | jq 'unique | ["[NONE]", "[REFRESH_NEEDED]"] + .')
@@ -416,9 +431,8 @@ update_dropdowns() {
     
     echo "🔧 Creating updated survey with Cloudflare data..."
     
-    # Merge static domain choices with Cloudflare domains
-    STATIC_DOMAINS='["efustryton.co.za", "efutechnologies.co.za", "[MANUAL_ENTRY]"]'
-    MERGED_DOMAINS=$(echo "$STATIC_DOMAINS $CLOUDFLARE_DOMAINS" | jq -s 'add | unique')
+    # Use Cloudflare domains with manual entry option
+    MERGED_DOMAINS=$(echo "$CLOUDFLARE_DOMAINS" | jq '. + ["[MANUAL_ENTRY]"] | unique')
     
     # Update survey spec with new domain and record choices
     UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson domains "$MERGED_DOMAINS" --argjson records "$CLOUDFLARE_RECORDS" '

@@ -95,14 +95,16 @@ export CLOUDFLARE_API_TOKEN="your_api_token_here"
 ```
 
 **What Gets Updated**:
-- **Domain Dropdown**: Combines static domains (`efustryton.co.za`, `efutechnologies.co.za`) with all Cloudflare zones
-- **Existing Record Dropdown**: Populates with all DNS records from all zones in your account
+- **Domain Dropdown**: Populated with all domains (zones) from your Cloudflare account + `[MANUAL_ENTRY]` option
+- **Existing Record Dropdown**: Populated with all DNS record names from all zones (domain part stripped) + default options `[NONE]`, `[REFRESH_NEEDED]`
 
 **Benefits**:
-- ✅ Always current domain and record lists
+- ✅ Always current domain and record lists from live Cloudflare data
 - ✅ No manual typing of domain/record names
 - ✅ Eliminates typos and errors
 - ✅ Click-to-select from live Cloudflare data
+- ✅ Record names properly formatted (domain suffix stripped)
+- ✅ Root domain records shown as "@"
 
 ## Available Actions
 
