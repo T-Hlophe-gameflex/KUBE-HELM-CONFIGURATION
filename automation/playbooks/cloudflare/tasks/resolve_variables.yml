@@ -8,14 +8,18 @@
       {%- if cf_action == 'clone_record' -%}
         {%- if domain is defined and (domain | trim) != '' -%}
           {{ domain | trim }}
-        {%- elif existing_domain is defined and (existing_domain | trim) != '' and (existing_domain | trim) != '[MANUAL_ENTRY]' -%}
+        {%- elif existing_domain is defined and (existing_domain | trim) != '' -%}
           {{ existing_domain | trim }}
+        {%- elif manual_domain is defined and (manual_domain | trim) != '' -%}
+          {{ manual_domain | trim }}
         {%- else -%}
           
         {%- endif -%}
       {%- else -%}
-        {%- if existing_domain is defined and (existing_domain | trim) != '' and (existing_domain | trim) != '[MANUAL_ENTRY]' -%}
+        {%- if existing_domain is defined and (existing_domain | trim) != '' -%}
           {{ existing_domain | trim }}
+        {%- elif manual_domain is defined and (manual_domain | trim) != '' -%}
+          {{ manual_domain | trim }}
         {%- elif domain is defined and (domain | trim) != '' -%}
           {{ domain | trim }}
         {%- else -%}
@@ -33,7 +37,7 @@
           
         {%- endif -%}
       {%- else -%}
-        {%- if existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' -%}
+        {%- if existing_record is defined and (existing_record | trim) != '' -%}
           {{ existing_record | trim }}
         {%- elif record_name is defined and (record_name | trim) != '' -%}
           {{ record_name | trim }}

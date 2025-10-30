@@ -32,10 +32,10 @@ This document provides comprehensive information about the AWX Cloudflare automa
 | Field Name | Variable | Type | Default Value | Description |
 |------------|----------|------|---------------|-------------|
 | Action | `cf_action` | multiplechoice | `create_record` | Operation to perform (create/update/delete/clone/create_domain) |
-| Domain | `existing_domain` | multiplechoice |`[DOMAINS]` | Domain selection from Cloudflare account |
+| Domain | `existing_domain` | multiplechoice | *(first available domain)* | Domain selection from Cloudflare account |
 | Manual Domain Entry | `manual_domain` | text | *(empty)* | Manual domain entry when not in dropdown |
 | Record Name | `record_name` | text | *(empty)* | DNS record name/subdomain |
-| Existing Record | `existing_record` | multiplechoice | `[NONE]` | Existing record selection (populated dynamically) |
+| Existing Record | `existing_record` | multiplechoice | *(first available record)* | Existing record selection (populated dynamically) |
 | Record Type | `record_type` | multiplechoice | `A` | DNS record type (A, AAAA, CNAME, MX, TXT, SRV) |
 | Record Value | `record_value` | text | *(empty)* | Record content (IP, hostname, text) |
 | TTL | `record_ttl` | multiplechoice | `auto` | Time to live setting |
@@ -77,13 +77,13 @@ CLOUDFLARE_API_TOKEN='your_token' ./scripts/awx_survey_manager.sh update-dropdow
 
 ### Dynamic Survey Dropdowns
 
-The survey manager now includes powerful **live data synchronization** with your Cloudflare account:
+The survey manager includes powerful **live data synchronization** with your Cloudflare account:
 
 **🌐 Automatic Dropdown Updates**:
 - Fetches all domains (zones) from your Cloudflare account
 - Retrieves all DNS records across all zones
 - Updates AWX survey dropdowns with current data
-- Merges with existing static domain choices
+- **Clean interface**: No placeholder values like `[MANUAL_ENTRY]` or `[NONE]`
 
 **Usage**:
 ```bash
@@ -95,11 +95,14 @@ export CLOUDFLARE_API_TOKEN="your_api_token_here"
 ```
 
 **What Gets Updated**:
-- **Domain Dropdown**: Populated with all domains (zones) from your Cloudflare account + `[MANUAL_ENTRY]` option
-- **Existing Record Dropdown**: Populated with all DNS record names from all zones (domain part stripped) + default options `[NONE]`, `[REFRESH_NEEDED]`
+- **Domain Dropdown**: Populated with all domains (zones) from your Cloudflare account only
+- **Existing Record Dropdown**: Populated with all DNS record names from all zones (domain part stripped)
 
 **Benefits**:
 - ✅ Always current domain and record lists from live Cloudflare data
+- ✅ No confusing placeholder values
+- ✅ Clean, professional interface
+- ✅ Automatic fallback to manual entry fields when dropdowns are empty
 - ✅ No manual typing of domain/record names
 - ✅ Eliminates typos and errors
 - ✅ Click-to-select from live Cloudflare data
