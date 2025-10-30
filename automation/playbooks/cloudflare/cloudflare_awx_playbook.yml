@@ -7,81 +7,23 @@
     domain_changes: []
     global_changes: []
     platform_changes: []
+    awx_password: "{{ lookup('env', 'AWX_PASSWORD') | default(lookup('pipe', 'kubectl get secret ansible-awx-admin-password -n awx -o jsonpath=\"{.data.password}\" | base64 --decode')) }}"
     
   tasks:
-    # ======================VARIABLE RESOLUTION===================================
-  
-    - name: Resolve domain name from dropdown or manual entry
-      set_fact:
-        resolved_domain: >-
-          {%- if existing_domain is defined and (existing_domain | trim) != '' and (existing_domain | trim) != '[MANUAL_ENTRY]' -%}
-            {{ existing_domain | trim }}
-          {%- elif domain is defined and (domain | trim) != '' -%}
-            {{ domain | trim }}
-          {%- else -%}
-            
-          {%- endif -%}
-
-    - name: Resolve record name from dropdown or manual entry
-      set_fact:
-        resolved_record_name: >-
-          {%- if existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' -%}
-            {{ existing_record | trim }}
-          {%- elif record_name is defined and (record_name | trim) != '' -%}
-            {{ record_name | trim }}
-          {%- else -%}
-            
-          {%- endif -%}
-
-    - name: Display action summary
-      debug:
-        msg:
-          - "════════════════════════════════════════════════════════════════"
-          - "  ACTION: {{ cf_action | upper | default('UNDEFINED') }}"
-          - "  DOMAIN: {{ resolved_domain | default('undefined') }}"
-          - "  RECORD: {{ resolved_record_name | default('none') }}"
-          - "  TYPE: {{ record_type | default('n/a') }}"
-          - "════════════════════════════════════════════════════════════════"
-
-    # ========================CREATE DOMAIN (ZONE)=================================
  
+    - name: Resolve input variables
+      include_tasks: "tasks/resolve_variables.yml"
+
+    - name: Create and apply AWX job labels
+      include_tasks: "tasks/manage_job_labels.yml"
+
     - name: Create Cloudflare zone
+      include_tasks: "tasks/create_zone.yml"
       when: cf_action == 'create_domain'
-      block:
-        - name: Create zone via API
-          uri:
-            url: "https://api.cloudflare.com/client/v4/zones"
-            method: POST
-            headers:
-              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-              Content-Type: "application/json"
-            body_format: json
-            body:
-              name: "{{ resolved_domain }}"
-              jump_start: true
-            return_content: true
-            validate_certs: "{{ cf_validate_certs | default(true) }}"
-          register: create_zone_result
-
-        - name: Track zone creation
-          set_fact:
-            domain_changes: "{{ domain_changes + [{'type': 'ZONE_CREATED', 'domain': resolved_domain, 'zone_id': create_zone_result.json.result.id | default('N/A'), 'status': 'SUCCESS' if create_zone_result.json.success else 'FAILED'}] }}"
-          when: create_zone_result.json is defined
-
-        - name: Display result
-          debug:
-            msg:
-              - "New Cloudflare Zone Created"
-              - "  Domain: {{ resolved_domain }}"
-              - "  Zone ID: {{ create_zone_result.json.result.id | default('N/A') }}"
-              - "  Status: {{ create_zone_result.json.result.status | default('N/A') }}"
-          when: create_zone_result.json.success | default(false)
-
-    # ====================STANDARDIZE DOMAIN SETTINGS==============================
 
     - name: Apply standard zone settings
       when: 
-        - cf_action in ['create_domain', 'standardize', 'sync', 'create_record']
+        - cf_action in ['create_domain', 'create_record']
         - resolved_domain is defined
         - resolved_domain != 'undefined'
         - resolved_domain | length > 0
@@ -105,8 +47,6 @@
         - name: Apply zone settings
           include_tasks: "tasks/apply_zone_settings.yml"
           when: zone_id is defined and zone_id | length > 0
-
-    # ======================UPDATE SETTINGS (ZONE/RECORD/ACCOUNT LEVEL)============
 
     - name: Update settings at different levels
       when:
@@ -150,8 +90,6 @@
             - name: Track account operation
               set_fact:
                 platform_changes: "{{ platform_changes + [{'type': 'ACCOUNT_SETTINGS_INFO', 'message': 'Account level settings require specific implementation per setting type'}] }}"
-
-    # ======================MANAGE DNS RECORDS=====================================
   
     - name: Manage DNS records
       when: 
@@ -197,34 +135,11 @@
                 domain: "{{ resolved_domain }}"
               when: rule_actions_to_apply | length > 0
 
-        - name: Prepare record variables
-          set_fact:
-            effective_record_name: "{{ resolved_record_name | default('') | trim | replace('\"','') | replace(\"'\",'') | regex_replace('\\s+',' ') }}"
-
-        - name: Build fully-qualified record name
-          set_fact:
-            fq_record_name: >-
-              {%- if effective_record_name is defined and effective_record_name | length > 0 -%}
-              {%- if effective_record_name | regex_search('\.' ~ resolved_domain ~ '$') -%}
-              {{ effective_record_name | trim }}
-              {%- elif effective_record_name == '@' -%}
-              {{ resolved_domain }}
-              {%- else -%}
-              {{ (effective_record_name | trim) ~ '.' ~ resolved_domain }}
-              {%- endif -%}
-              {%- else -%}
-              
-              {%- endif -%}
-
-        - name: Set TTL and proxied defaults
-          set_fact:
-            numeric_ttl: "{{ global_ttl | default(3600) | int }}"
-            effective_proxied: "{{ record_proxied | default(proxied | default(global_proxied | default(false))) | bool }}"
+        - name: Prepare record variables for DNS operations
+          include_tasks: "tasks/prepare_record_variables.yml"
 
         - name: Execute DNS record operation
           include_tasks: "tasks/manage_dns_record.yml"
-
-    # =======================SYNC PLATFORM RECORDS=================================
 
     - name: Sync standard records across all zones
       when: cf_action == 'sync'
@@ -248,8 +163,6 @@
         - name: Display sync result
           debug:
             msg: "[SUCCESS] Platform sync completed - {{ (standard_records | default([]) | length) }} record types applied"
-
-    # ========================OUTPUT SUMMARIES=====================================
 
     - name: Display zone configuration summary
       when: resolved_domain is defined and resolved_domain|length > 0
@@ -291,3 +204,4 @@
           
           ============================================================
 
+  
