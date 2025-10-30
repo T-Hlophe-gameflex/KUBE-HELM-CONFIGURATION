@@ -1,7 +1,7 @@
 ---
 - hosts: localhost
   connection: local
-  gather_facts: false
+  gather_facts: true
   vars:
     awx_host: "{{ ansible_host | default('localhost:8052') }}"
     awx_template_id: "{{ template_id | default('21') }}"
