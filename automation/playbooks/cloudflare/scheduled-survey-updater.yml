@@ -1,0 +1,68 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    awx_host: "{{ ansible_host | default('localhost:8052') }}"
+    awx_template_id: "{{ template_id | default('21') }}"
+    
+  tasks:
+    - name: Update Survey Dropdowns - Scheduled Job
+      block:
+        - name: Display job information
+          debug:
+            msg:
+              - "   AWX Survey Auto-Updater - Scheduled Execution"
+              - "   Started: {{ ansible_date_time.iso8601 }}"
+              - "   Target AWX: {{ awx_host }}"
+              - "   Template ID: {{ awx_template_id }}"
+              - "   Purpose: Update survey dropdowns with live Cloudflare data"
+        
+        - name: Execute survey update script
+          shell: "{{ playbook_dir }}/../../scripts/cloudflare-survey-scheduler.sh"
+          environment:
+            AWX_HOST: "{{ awx_host }}"
+            AWX_TEMPLATE_ID: "{{ awx_template_id }}"
+            CLOUDFLARE_API_TOKEN: "{{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+          register: survey_update_output
+          
+        - name: Display update results
+          debug:
+            msg:
+              - "✅ Survey update completed successfully!"
+              - "📊 Execution time: {{ ansible_date_time.iso8601 }}"
+              - "🔄 Survey dropdowns refreshed with latest Cloudflare data"
+              - ""
+              - "📝 Next scheduled update recommendations:"
+              - "   • Run this job hourly during business hours"
+              - "   • Run after major Cloudflare template executions"
+              - "   • Monitor logs for any API issues"
+          when: survey_update_output.rc == 0
+          
+      rescue:
+        - name: Handle update failure
+          debug:
+            msg:
+              - "❌ Survey update failed"
+              - "🔍 Error details:"
+              - "   Exit code: {{ survey_update_output.rc | default('unknown') }}"
+              - "   Error: {{ survey_update_output.stderr | default('No error details') }}"
+              - ""
+              - "🛠️  Troubleshooting steps:"
+              - "   1. Check Cloudflare API token availability"
+              - "   2. Verify AWX namespace access"
+              - "   3. Check script permissions and paths"
+              - "   4. Review /tmp/cloudflare-survey-update.log"
+              
+        - name: Set failure status
+          fail:
+            msg: "Survey update job failed - check logs for details"
+            
+    - name: Job completion summary
+      debug:
+        msg:
+          - "════════════════════════════════════════════════════════════"
+          - "AWX Survey Auto-Updater - Job Complete"
+          - "Finished: {{ ansible_date_time.iso8601 }}"
+          - "Status: {{ 'SUCCESS' if survey_update_output.rc == 0 else 'FAILED' }}"
+          - "════════════════════════════════════════════════════════════"
