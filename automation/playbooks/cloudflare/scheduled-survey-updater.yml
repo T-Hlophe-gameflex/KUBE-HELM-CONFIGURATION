@@ -6,9 +6,18 @@
     awx_host: "{{ ansible_host | default('localhost:8052') }}"
     awx_template_id: "{{ template_id | default('21') }}"
     awx_username: "admin"
-    awx_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') | default('admin', true) }}"
     
   tasks:
+    - name: Get AWX admin password
+      shell: kubectl get secret ansible-awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 --decode
+      register: awx_password_result
+      no_log: true
+      
+    - name: Set AWX password
+      set_fact:
+        awx_password: "{{ awx_password_result.stdout }}"
+      no_log: true
+
     - name: Update Survey Dropdowns - Scheduled Job
       block:
         - name: Display job information
@@ -19,6 +28,7 @@
               - "   Target AWX: {{ awx_host }}"
               - "   Template ID: {{ awx_template_id }}"
               - "   Purpose: Update survey dropdowns with live Cloudflare data"
+              - "   Cloudflare Token Available: {{ 'Yes' if lookup('env','CLOUDFLARE_API_TOKEN') | length > 0 else 'No (using fallback)' }}"
         
         - name: Get current survey configuration
           uri:
