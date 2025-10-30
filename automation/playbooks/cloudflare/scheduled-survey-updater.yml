@@ -6,8 +6,20 @@
     awx_host: "ansible-awx-service.awx.svc.cluster.local"
     awx_port: "80"
     awx_template_id: "21"
+    awx_username: "admin"
     
   tasks:
+    - name: Get AWX admin password from Kubernetes secret
+      k8s_info:
+        api_version: v1
+        kind: Secret
+        name: ansible-awx-admin-password
+        namespace: awx
+      register: awx_secret_result
+      
+    - name: Set AWX password variable
+      set_fact:
+        awx_password: "{{ awx_secret_result.resources[0].data.password | b64decode }}"
     - name: Get AWX admin password
       shell: kubectl get secret ansible-awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 --decode
       register: awx_password_result
