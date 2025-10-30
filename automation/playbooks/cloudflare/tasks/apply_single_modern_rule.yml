@@ -13,7 +13,7 @@
 
 - name: Generate rule configuration from template for {{ current_rule_action }}
   set_fact:
-    rule_payload: "{{ lookup('template', '../../templates/cloudflare_modern_rules.j2') | from_json }}"
+    rule_payload: "{{ lookup('template', '../cloudflare_modern_rules.j2') | from_json }}"
 
 - name: Determine appropriate ruleset phase based on rule action
   set_fact:
