@@ -23,27 +23,37 @@
         {{ cf_action | upper | default('UNKNOWN') }}
       {%- endif -%}
 
-- name: Create action-specific label
-  awx.awx.label:
-    controller_host: "{{ awx_host | default('http://localhost:8052') }}"
-    controller_username: "{{ awx_username | default('admin') }}"
-    controller_password: "{{ awx_password | default(lookup('env', 'AWX_PASSWORD')) }}"
+- name: Create action-specific label via API
+  uri:
+    url: "http://localhost:8052/api/v2/labels/"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ action_label }}"
+      organization: 1
+    return_content: true
     validate_certs: false
-    name: "{{ action_label }}"
-    organization: "Default"
-    state: present
+    status_code: [200, 201, 400]  # 400 if already exists
   register: action_label_result
   ignore_errors: true
 
 - name: Create record type label (if applicable)
-  awx.awx.label:
-    controller_host: "{{ awx_host | default('http://localhost:8052') }}"
-    controller_username: "{{ awx_username | default('admin') }}"
-    controller_password: "{{ awx_password | default(lookup('env', 'AWX_PASSWORD')) }}"
+  uri:
+    url: "http://localhost:8052/api/v2/labels/"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ record_type | upper }}"
+      organization: 1
+    return_content: true
     validate_certs: false
-    name: "{{ record_type | upper }}"
-    organization: "Default"
-    state: present
+    status_code: [200, 201, 400]  # 400 if already exists
   register: type_label_result
   when: 
     - record_type is defined
@@ -51,14 +61,19 @@
   ignore_errors: true
 
 - name: Create domain label
-  awx.awx.label:
-    controller_host: "{{ awx_host | default('http://localhost:8052') }}"
-    controller_username: "{{ awx_username | default('admin') }}"
-    controller_password: "{{ awx_password | default(lookup('env', 'AWX_PASSWORD')) }}"
+  uri:
+    url: "http://localhost:8052/api/v2/labels/"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ resolved_domain | upper | replace('.', '-') }}"
+      organization: 1
+    return_content: true
     validate_certs: false
-    name: "{{ resolved_domain | upper | replace('.', '-') }}"
-    organization: "Default"
-    state: present
+    status_code: [200, 201, 400]  # 400 if already exists
   register: domain_label_result
   when: 
     - resolved_domain is defined
@@ -70,6 +85,6 @@
   debug:
     msg:
       - "📋 AWX Job Labels Created:"
-      - "  Action Label: {{ action_label }} - {{ 'SUCCESS' if action_label_result.changed | default(false) else 'EXISTS' }}"
-      - "  Type Label: {{ record_type | upper | default('N/A') }} - {{ 'SUCCESS' if type_label_result.changed | default(false) else 'EXISTS/SKIPPED' }}"
-      - "  Domain Label: {{ resolved_domain | upper | replace('.', '-') | default('N/A') }} - {{ 'SUCCESS' if domain_label_result.changed | default(false) else 'EXISTS/SKIPPED' }}"
+      - "  Action Label: {{ action_label }} - {{ 'CREATED' if action_label_result.status == 201 else ('EXISTS' if action_label_result.status == 400 else 'UNKNOWN') }}"
+      - "  Type Label: {{ record_type | upper | default('N/A') }} - {{ 'CREATED' if type_label_result.status | default(0) == 201 else ('EXISTS' if type_label_result.status | default(0) == 400 else 'SKIPPED') }}"
+      - "  Domain Label: {{ resolved_domain | upper | replace('.', '-') | default('N/A') }} - {{ 'CREATED' if domain_label_result.status | default(0) == 201 else ('EXISTS' if domain_label_result.status | default(0) == 400 else 'SKIPPED') }}"

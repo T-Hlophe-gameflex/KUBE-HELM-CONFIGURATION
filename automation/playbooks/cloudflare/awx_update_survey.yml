@@ -10,7 +10,7 @@ survey:
         - update_record
         - delete_record
         - clone_record
-        - apply_page_rule
+        - create_domain
       required: true
       default: create_record
       description: "Select the Cloudflare action to perform (required)."

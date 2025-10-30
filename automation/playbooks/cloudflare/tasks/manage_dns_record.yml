@@ -17,26 +17,6 @@
   set_fact:
     record_id: "{{ record_id | default('') }}"
 
-- name: Set operation labels for job tracking
-  set_fact:
-    operation_label: "{{ operation_labels[cf_action] | default(cf_action | upper) }}"
-    operation_description: "{{ operation_descriptions[cf_action] | default(cf_action | replace('_', ' ') | title) }}"
-  vars:
-    operation_labels:
-      create_record: "CREATE"
-      update_record: "UPDATE"
-      delete_record: "DELETE"
-      clone_record: "CLONE"
-    operation_descriptions:
-      create_record: "Creating DNS record"
-      update_record: "Updating DNS record"
-      delete_record: "Deleting DNS record"
-      clone_record: "Cloning DNS record"
-  tags:
-    - "{{ cf_action | default('unknown') }}"
-    - "dns-record"
-    - "{{ cf_action }}"
-
 # ========================CLONE RECORD LOGIC=========================
 - name: Auto-discover source domain and clone record
   when: cf_action == 'clone_record'
@@ -225,13 +205,8 @@
 
     - name: Track clone result
       debug:
-        msg: "[{{ 'SUCCESS' if (clone_result.json.success | default(false)) else 'FAILED' }}] {{ operation_label }}: Cloned {{ found_source_record.type | default(record_type) }} record: {{ source_fq_record_name }} → {{ fq_record_name }}"
+        msg: "[{{ 'SUCCESS' if (clone_result.json.success | default(false)) else 'FAILED' }}] Cloned {{ found_source_record.type | default(record_type) }} record: {{ source_fq_record_name }} → {{ fq_record_name }}"
       when: clone_result is defined
-      tags:
-        - "{{ operation_label | lower }}"
-        - "clone_record"
-        - "dns-record"
-        - "result-tracking"
 
     - name: Fail if clone operation failed
       fail:
@@ -437,23 +412,13 @@
     msg: >-
       {% if cf_action in ['create_record','update_record'] %}
       {% set success = (record_result.json.success if (record_result is defined and record_result.json is defined and record_result.json.success is defined) else false) %}
-      {% if success %}[SUCCESS] {{ operation_label }}: {{ fq_record_name }} ({{ record_type }}){% else %}[FAILED] {{ operation_label }}: {{ fq_record_name }} - {{ (record_result.json.errors | map(attribute='message') | join(', ') if (record_result is defined and record_result.json is defined and record_result.json.errors is defined) else 'Unknown error') }}{% endif %}
+      {% if success %}[SUCCESS] {{ cf_action | replace('_', ' ') | title }}: {{ fq_record_name }} ({{ record_type }}){% else %}[FAILED] {{ cf_action | replace('_', ' ') | title }}: {{ fq_record_name }} - {{ (record_result.json.errors | map(attribute='message') | join(', ') if (record_result is defined and record_result.json is defined and record_result.json.errors is defined) else 'Unknown error') }}{% endif %}
       {% elif cf_action == 'delete_record' %}
       {% set success = (delete_result.json.success if (delete_result is defined and delete_result.json is defined and delete_result.json.success is defined) else false) %}
-      {% if success %}[SUCCESS] {{ operation_label }}: {{ fq_record_name }}{% if record_type is defined %} ({{ record_type }}){% endif %}{% else %}[FAILED] {{ operation_label }}: {{ fq_record_name }}{% endif %}
+      {% if success %}[SUCCESS] Deleted: {{ fq_record_name }}{% if record_type is defined %} ({{ record_type }}){% endif %}{% else %}[FAILED] Delete failed: {{ fq_record_name }}{% endif %}
       {% endif %}
-  tags:
-    - "{{ operation_label | lower }}"
-    - "{{ cf_action }}"
-    - "dns-record"
-    - "result-tracking"
 
 - name: Track domain level changes
   set_fact:
-    domain_changes: "{{ domain_changes + [{'action': cf_action, 'operation_label': operation_label, 'record': fq_record_name, 'type': record_type | default('ANY'), 'status': 'success' if (record_result.json.success | default(false) or delete_result.json.success | default(false)) else 'failed'}] }}"
+    domain_changes: "{{ domain_changes + [{'action': cf_action, 'record': fq_record_name, 'type': record_type | default('ANY'), 'status': 'success' if (record_result.json.success | default(false) or delete_result.json.success | default(false)) else 'failed'}] }}"
   when: cf_action in ['create_record','update_record','delete_record']
-  tags:
-    - "{{ operation_label | lower }}"
-    - "{{ cf_action }}"
-    - "dns-record"
-    - "change-tracking"
