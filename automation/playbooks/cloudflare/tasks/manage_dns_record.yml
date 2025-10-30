@@ -19,34 +19,12 @@
 
 - name: Set operation labels for job tracking
   set_fact:
-    operation_label: >-
-      {%- if cf_action == 'create_record' -%}
-        CREATE
-      {%- elif cf_action == 'update_record' -%}
-        UPDATE
-      {%- elif cf_action == 'delete_record' -%}
-        DELETE
-      {%- elif cf_action == 'clone_record' -%}
-        CLONE
-      {%- else -%}
-        {{ cf_action | upper }}
-      {%- endif -%}
-    operation_description: >-
-      {%- if cf_action == 'create_record' -%}
-        Creating DNS record
-      {%- elif cf_action == 'update_record' -%}
-        Updating DNS record
-      {%- elif cf_action == 'delete_record' -%}
-        Deleting DNS record
-      {%- elif cf_action == 'clone_record' -%}
-        Cloning DNS record
-      {%- else -%}
-        {{ cf_action | replace('_', ' ') | title }}
-      {%- endif -%}
+    operation_label: "{% if cf_action == 'create_record' %}CREATE{% elif cf_action == 'update_record' %}UPDATE{% elif cf_action == 'delete_record' %}DELETE{% elif cf_action == 'clone_record' %}CLONE{% else %}{{ cf_action | upper }}{% endif %}"
+    operation_description: "{% if cf_action == 'create_record' %}Creating DNS record{% elif cf_action == 'update_record' %}Updating DNS record{% elif cf_action == 'delete_record' %}Deleting DNS record{% elif cf_action == 'clone_record' %}Cloning DNS record{% else %}{{ cf_action | replace('_', ' ') | title }}{% endif %}"
   tags:
     - "{{ cf_action | default('unknown') }}"
     - "dns-record"
-    - "{{ (cf_action + '_record') if cf_action in ['create', 'update', 'delete', 'clone'] else cf_action }}"
+    - "{{ cf_action }}"
 
 # ========================CLONE RECORD LOGIC=========================
 - name: Auto-discover source domain and clone record
