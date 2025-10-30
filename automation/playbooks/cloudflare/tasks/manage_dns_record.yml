@@ -206,10 +206,31 @@
         msg: "[{{ 'SUCCESS' if (clone_result.json.success | default(false)) else 'FAILED' }}] Cloned {{ found_source_record.type | default(record_type) }} record: {{ source_fq_record_name }} → {{ fq_record_name }}"
       when: clone_result is defined
 
+    - name: Fail if clone operation failed
+      fail:
+        msg: |
+          ❌ CLONE OPERATION FAILED!
+          
+          Error: {{ clone_result.json.errors[0].message | default('Unknown error') if clone_result.json.errors is defined else 'API request failed' }}
+          Code: {{ clone_result.json.errors[0].code | default('N/A') if clone_result.json.errors is defined else 'N/A' }}
+          
+          Source: {{ source_fq_record_name }} ({{ found_source_record.type | default(record_type) }})
+          Target: {{ fq_record_name }} ({{ found_source_record.type | default(record_type) }})
+          
+          Please check:
+          1. Target record name doesn't already exist
+          2. Record content is valid for the record type
+          3. You have proper permissions for the target domain
+      when: 
+        - clone_result is defined
+        - not (clone_result.json.success | default(false))
+
     - name: Set operation completed for clone
       set_fact:
         operation_completed: true
-      when: clone_result is defined and clone_result.json.success | default(false)
+      when: 
+        - clone_result is defined 
+        - (clone_result.json.success | default(false) or clone_result.status is defined)
 
 # ========================REGULAR RECORD OPERATIONS=========================
 - name: Find existing record
