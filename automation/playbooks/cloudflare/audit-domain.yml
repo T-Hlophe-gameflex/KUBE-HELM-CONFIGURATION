@@ -1,7 +1,0 @@
----
-- hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: noop placeholder for audit-domain (archived)
-      debug:
-        msg: "Placeholder playbook for audit-domain.yml (archived). See automation/archive/ for original."

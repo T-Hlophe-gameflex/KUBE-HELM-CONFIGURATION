@@ -17,76 +17,131 @@
   set_fact:
     record_id: "{{ record_id | default('') }}"
 
-- name: Clone record
+# ========================CLONE RECORD LOGIC=========================
+- name: Auto-discover source domain and clone record
   when: cf_action == 'clone_record'
   block:
-    - name: Get source domain zone ID
+    - name: Determine source record name for discovery
+      set_fact:
+        source_record_name: >-
+          {%- if existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' -%}
+            {{ existing_record | trim }}
+          {%- else -%}
+            {{ resolved_record_name }}
+          {%- endif -%}
+    
+    - name: Display clone setup
+      debug:
+        msg:
+          - "🔍 STARTING AUTO-DISCOVERY CLONE:"
+          - "  Looking for record: {{ source_record_name | default('undefined') }}"
+          - "  Record type: {{ record_type | default('A') }}"
+          - "  Target domain: {{ resolved_domain | default('undefined') }}"
+    
+    - name: Get all zones to find source domain
       uri:
-        url: "https://api.cloudflare.com/client/v4/zones?name={{ source_domain | default(resolved_domain) }}"
+        url: "https://api.cloudflare.com/client/v4/zones"
         method: GET
         headers:
           Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
         return_content: true
         validate_certs: "{{ cf_validate_certs | default(true) }}"
-      register: source_zone_lookup
+      register: all_zones_for_clone
+      when: source_record_name is defined and source_record_name | length > 0
 
-    - name: Set source zone_id
+    - name: Search for record across all domains
+      uri:
+        url: "https://api.cloudflare.com/client/v4/zones/{{ item.id }}/dns_records?type={{ record_type | default('A') }}&name={{ source_fq_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+        return_content: true
+        validate_certs: "{{ cf_validate_certs | default(true) }}"
+      register: record_search_results
+      loop: "{{ all_zones_for_clone.json.result | default([]) }}"
+      vars:
+        source_fq_name: >-
+          {%- if source_record_name == '@' -%}
+            {{ item.name }}
+          {%- elif source_record_name | regex_search('\.' ~ item.name ~ '$') -%}
+            {{ source_record_name }}
+          {%- else -%}
+            {{ source_record_name }}.{{ item.name }}
+          {%- endif -%}
+      when: 
+        - all_zones_for_clone is defined
+        - source_record_name is defined and source_record_name | length > 0
+      failed_when: false
+
+    - name: Find domain containing the record
       set_fact:
-        source_zone_id: "{{ source_zone_lookup.json.result[0].id if source_zone_lookup.json.result|length > 0 else '' }}"
+        source_domain: "{{ item.item.name }}"
+        source_zone_id: "{{ item.item.id }}"
+        found_source_record: "{{ item.json.result[0] if item.json.result | length > 0 else {} }}"
+      loop: "{{ record_search_results.results | default([]) }}"
+      when: 
+        - record_search_results is defined
+        - item.json is defined 
+        - item.json.result | length > 0
+      loop_control:
+        loop_var: item
+
+    - name: Validate clone prerequisites
+      fail:
+        msg: |
+          ❌ CLONE OPERATION FAILED - SOURCE RECORD NOT FOUND!
+          
+          Searched for: {{ source_record_name }} ({{ record_type | default('A') }} record)
+          Target domain: {{ resolved_domain }}
+          
+          The record '{{ source_record_name }}' was not found in any domain in your Cloudflare account.
+          
+          Please verify:
+          1. The record name is correct
+          2. The record type is correct  
+          3. The record exists in source domain
+      when: 
+        - source_domain is not defined or source_domain | length == 0
+        - source_record_name is defined and source_record_name | length > 0
+      
+    - name: Display successful auto-discovery
+      debug:
+        msg:
+          - "✅ AUTO-DISCOVERY SUCCESSFUL!"
+          - "  Source domain found: {{ source_domain | default('NOT FOUND') }}"
+          - "  Source record: {{ found_source_record.name | default('N/A') }}"
+          - "  Source content: {{ found_source_record.content | default('N/A') }}"
+          - "  Target domain: {{ resolved_domain | default('undefined') }}"
+          - "  Target record: {{ resolved_record_name | default('undefined') }}"
+      when: source_domain is defined and source_domain | length > 0
 
     - name: Build source record name
       set_fact:
-        source_fq_record_name: >-
-          {%- if source_record_name is defined and source_record_name | length > 0 -%}
-          {%- if source_record_name | regex_search('\.' ~ (source_domain | default(resolved_domain)) ~ '$') -%}
-          {{ source_record_name | trim }}
-          {%- elif source_record_name == '@' -%}
-          {{ source_domain | default(resolved_domain) }}
-          {%- else -%}
-          {{ (source_record_name | trim) ~ '.' ~ (source_domain | default(resolved_domain)) }}
-          {%- endif -%}
-          {%- else -%}
-          {{ resolved_record_name | default('') }}
-          {%- endif -%}
-
-    - name: Get source record details
-      uri:
-        url: "https://api.cloudflare.com/client/v4/zones/{{ source_zone_id }}/dns_records?type={{ record_type }}&name={{ source_fq_record_name | urlencode }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-        return_content: true
-        validate_certs: "{{ cf_validate_certs | default(true) }}"
-      register: source_record_lookup
-      when: source_zone_id is defined and source_zone_id | length > 0
-
-    - name: Set source_record fact
-      set_fact:
-        source_record: "{{ source_record_lookup.json.result[0] if source_record_lookup.json.result|length > 0 else {} }}"
-      when: source_record_lookup is defined
+        source_fq_record_name: "{{ found_source_record.name | default('') }}"
+      when: found_source_record is defined and found_source_record | length > 0
 
     - name: Build clone payload JSON
       set_fact:
         clone_payload_json: >-
-          {{ ({'type': source_record.type | default(record_type),
+          {{ ({'type': found_source_record.type | default(record_type),
                'name': fq_record_name,
-               'content': (record_value | default(source_record.content | default(''))),
-               'ttl': (record_ttl | default(source_record.ttl | default(3600)) | int),
-               'priority': source_record.priority | default(omit) }
-             ) | combine({'proxied': (record_proxied | default(source_record.proxied | default(false)) | bool) } if (source_record.type | default(record_type)) in ['A','AAAA','CNAME'] else {})
+               'content': (record_value | default(found_source_record.content | default(''))),
+               'ttl': (record_ttl | default(found_source_record.ttl | default(3600)) | int),
+               'priority': found_source_record.priority | default(omit) }
+             ) | combine({'proxied': (record_proxied | default(found_source_record.proxied | default(false)) | bool) } if (found_source_record.type | default(record_type)) in ['A','AAAA','CNAME'] else {})
              | to_json }}
-      when: source_record is defined and source_record | length > 0
+      when: found_source_record is defined and found_source_record | length > 0
 
     - name: Display clone details
       debug:
         msg:
-          - "Cloning record from {{ source_domain | default(resolved_domain) }} to {{ resolved_domain }}"
-          - "  Source: {{ source_fq_record_name }} ({{ source_record.type | default('N/A') }})"
-          - "  Target: {{ fq_record_name }} ({{ source_record.type | default(record_type) }})"
-          - "  Content: {{ source_record.content | default('N/A') }}"
-          - "  TTL: {{ source_record.ttl | default(3600) }}"
-          - "  Proxied: {{ source_record.proxied | default(false) }}"
-      when: source_record is defined and source_record | length > 0
+          - "📋 Cloning record from {{ source_domain | default(resolved_domain) }} to {{ resolved_domain }}"
+          - "  Source: {{ source_fq_record_name }} ({{ found_source_record.type | default('N/A') }})"
+          - "  Target: {{ fq_record_name }} ({{ found_source_record.type | default(record_type) }})"
+          - "  Content: {{ found_source_record.content | default('N/A') }}"
+          - "  TTL: {{ found_source_record.ttl | default(3600) }}"
+          - "  Proxied: {{ found_source_record.proxied | default(false) }}"
+      when: found_source_record is defined and found_source_record | length > 0
 
     - name: Write clone payload to temp file
       copy:
@@ -111,9 +166,15 @@
 
     - name: Track clone result
       debug:
-        msg: "[{{ 'SUCCESS' if (clone_result.json.success | default(false)) else 'FAILED' }}] Cloned {{ source_record.type | default(record_type) }} record: {{ source_fq_record_name }} → {{ fq_record_name }}"
+        msg: "[{{ 'SUCCESS' if (clone_result.json.success | default(false)) else 'FAILED' }}] Cloned {{ found_source_record.type | default(record_type) }} record: {{ source_fq_record_name }} → {{ fq_record_name }}"
       when: clone_result is defined
 
+    - name: Set operation completed for clone
+      set_fact:
+        operation_completed: true
+      when: clone_result is defined and clone_result.json.success | default(false)
+
+# ========================REGULAR RECORD OPERATIONS=========================
 - name: Find existing record
   uri:
     url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?{% if record_type is defined %}type={{ record_type }}&{% endif %}name={{ fq_record_name | urlencode }}"
@@ -123,12 +184,17 @@
     return_content: true
     validate_certs: "{{ cf_validate_certs | default(true) }}"
   register: record_lookup
-  when: (record_id is not defined or record_id == '') and fq_record_name is defined and fq_record_name | length > 0
+  when: 
+    - (record_id is not defined or record_id == '') 
+    - fq_record_name is defined and fq_record_name | length > 0
+    - operation_completed is not defined or not operation_completed
 
 - name: Set record_id from lookup
   set_fact:
     record_id: "{{ record_lookup.json.result[0].id }}"
-  when: record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0
+  when: 
+    - record_lookup is defined and record_lookup.json is defined and record_lookup.json.result|length > 0
+    - operation_completed is not defined or not operation_completed
 
 - name: Auto-convert create to update when record exists
   set_fact:
@@ -137,6 +203,7 @@
     - cf_action == 'create_record'
     - record_id is defined
     - record_id != ''
+    - operation_completed is not defined or not operation_completed
 
 - name: Build record payload JSON
   set_fact:
@@ -149,14 +216,19 @@
          | combine({'proxied': (effective_proxied | default(false))} if record_type in ['A','AAAA','CNAME'] else {})
          | combine({'priority': (record_priority|int if record_priority is defined else 10)} if record_type in ['MX','SRV'] else {})
          | to_json }}
-  when: record_type is defined and cf_action in ['create_record','update_record']
+  when: 
+    - record_type is defined 
+    - cf_action in ['create_record','update_record']
+    - operation_completed is not defined or not operation_completed
 
 - name: Write record payload to temp file
   copy:
     content: "{{ record_payload_json }}"
     dest: "/tmp/record_payload_{{ inventory_hostname }}.json"
     mode: '0644'
-  when: cf_action in ['create_record','update_record']
+  when: 
+    - cf_action in ['create_record','update_record']
+    - operation_completed is not defined or not operation_completed
 
 - name: Validate CNAME target is not an IP address
   fail:
@@ -167,6 +239,7 @@
     - record_type == 'CNAME'
     - record_value is defined
     - record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$')
+    - operation_completed is not defined or not operation_completed
 
 - name: Validate CNAME target does not reference itself
   fail:
@@ -184,6 +257,7 @@
     - record_value is defined
     - fq_record_name is defined
     - (record_value | lower | trim | regex_replace('\\.$', '')) == (fq_record_name | lower | trim | regex_replace('\\.$', ''))
+    - operation_completed is not defined or not operation_completed
 
 - name: Validate A record has valid IPv4 address
   fail:
@@ -200,6 +274,7 @@
     - record_type == 'A'
     - record_value is defined
     - not (record_value | trim | regex_search('^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$'))
+    - operation_completed is not defined or not operation_completed
 
 - name: Validate AAAA record has valid IPv6 address
   fail:
@@ -216,6 +291,7 @@
     - record_type == 'AAAA'
     - record_value is defined
     - not (record_value | trim | regex_search('^[0-9a-fA-F:]+$'))
+    - operation_completed is not defined or not operation_completed
 
 - name: Create or update record
   uri:
@@ -229,7 +305,9 @@
     body: "{{ lookup('file', '/tmp/record_payload_' ~ inventory_hostname ~ '.json') | from_json }}"
     return_content: true
     validate_certs: "{{ cf_validate_certs | default(true) }}"
-  when: cf_action in ['create_record','update_record']
+  when: 
+    - cf_action in ['create_record','update_record']
+    - operation_completed is not defined or not operation_completed
   register: record_result
   ignore_errors: yes
 
@@ -242,16 +320,24 @@
       --data-binary @/tmp/record_payload_{{ inventory_hostname }}.json
   args:
     executable: /bin/bash
-  when: cf_action in ['create_record','update_record'] and ((record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1))
+  when: 
+    - cf_action in ['create_record','update_record'] 
+    - ((record_result is failed) or (record_result is defined and record_result.status is defined and record_result.status == -1))
+    - operation_completed is not defined or not operation_completed
   register: record_curl_result
 
 - name: Normalize curl result
   set_fact:
     record_result: "{{ {'json': (record_curl_result.stdout | default('') | from_json) if record_curl_result.stdout|length > 0 else {} } }}"
-  when: record_curl_result is defined and record_curl_result.stdout is defined
+  when: 
+    - record_curl_result is defined and record_curl_result.stdout is defined
+    - operation_completed is not defined or not operation_completed
 
 - name: Delete record
-  when: cf_action == 'delete_record' and record_id
+  when: 
+    - cf_action == 'delete_record' 
+    - record_id
+    - operation_completed is not defined or not operation_completed
   uri:
     url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
     method: DELETE

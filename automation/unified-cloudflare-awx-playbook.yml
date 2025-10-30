@@ -1,5 +1,0 @@
----
-# This file is a small wrapper so the AWX automation script can point
-# at automation/unified-cloudflare-awx-playbook.yml while the real
-# implementation lives under automation/playbooks/cloudflare/.
-- import_playbook: playbooks/cloudflare/wrapper-unified-cloudflare-awx.yml
