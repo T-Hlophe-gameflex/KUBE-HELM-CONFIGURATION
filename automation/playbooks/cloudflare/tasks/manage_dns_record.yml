@@ -17,7 +17,6 @@
   set_fact:
     record_id: "{{ record_id | default('') }}"
 
-# ========================CLONE RECORD LOGIC=========================
 - name: Auto-discover source domain and clone record
   when: cf_action == 'clone_record'
   block:
@@ -234,7 +233,6 @@
         - clone_result is defined 
         - (clone_result.json.success | default(false) or clone_result.status is defined)
 
-# ========================REGULAR RECORD OPERATIONS=========================
 - name: Find existing record
   uri:
     url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?{% if record_type is defined %}type={{ record_type }}&{% endif %}name={{ fq_record_name | urlencode }}"
