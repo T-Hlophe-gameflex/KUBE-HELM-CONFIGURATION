@@ -5,6 +5,8 @@
   vars:
     awx_host: "{{ ansible_host | default('localhost:8052') }}"
     awx_template_id: "{{ template_id | default('21') }}"
+    awx_username: "admin"
+    awx_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') | default('admin', true) }}"
     
   tasks:
     - name: Update Survey Dropdowns - Scheduled Job
@@ -12,57 +14,135 @@
         - name: Display job information
           debug:
             msg:
-              - "   AWX Survey Auto-Updater - Scheduled Execution"
+              - "🕐 AWX Survey Auto-Updater - Scheduled Execution"
               - "   Started: {{ ansible_date_time.iso8601 }}"
               - "   Target AWX: {{ awx_host }}"
               - "   Template ID: {{ awx_template_id }}"
               - "   Purpose: Update survey dropdowns with live Cloudflare data"
         
-        - name: Execute survey update script
-          shell: "{{ playbook_dir }}/../../scripts/cloudflare-survey-scheduler.sh"
-          environment:
-            AWX_HOST: "{{ awx_host }}"
-            AWX_TEMPLATE_ID: "{{ awx_template_id }}"
-            CLOUDFLARE_API_TOKEN: "{{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
-          register: survey_update_output
+        - name: Get current survey configuration
+          uri:
+            url: "http://{{ awx_host }}/api/v2/job_templates/{{ awx_template_id }}/survey_spec/"
+            method: GET
+            user: "{{ awx_username }}"
+            password: "{{ awx_password }}"
+            force_basic_auth: true
+            return_content: true
+          register: current_survey
+          
+        - name: Get Cloudflare zones (domains)
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+          register: cf_zones
+          when: lookup('env','CLOUDFLARE_API_TOKEN') | length > 0
+          failed_when: false
+          
+        - name: Extract domain names from zones
+          set_fact:
+            domain_list: "{{ (cf_zones.json.result | map(attribute='name') | list | sort)[:20] + ['[MANUAL_ENTRY]'] }}"
+          when: 
+            - cf_zones is defined 
+            - cf_zones.json is defined
+            - cf_zones.json.success | default(false)
+          
+        - name: Use fallback domain list if API fails
+          set_fact:
+            domain_list: 
+              - "efustryton.co.za"
+              - "efutechnologies.co.za" 
+              - "[MANUAL_ENTRY]"
+          when: domain_list is not defined
+          
+        - name: Collect DNS records from all zones
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones/{{ item.id }}/dns_records"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+          register: dns_records_results
+          loop: "{{ cf_zones.json.result | default([]) }}"
+          when: 
+            - cf_zones is defined 
+            - cf_zones.json is defined
+            - cf_zones.json.success | default(false)
+            - lookup('env','CLOUDFLARE_API_TOKEN') | length > 0
+          failed_when: false
+          
+        - name: Extract unique record names
+          set_fact:
+            all_record_names: >-
+              {{ dns_records_results.results 
+                 | selectattr('json', 'defined')
+                 | selectattr('json.success', 'equalto', true)
+                 | map(attribute='json.result') 
+                 | flatten
+                 | map(attribute='name')
+                 | map('regex_replace', '\.[^.]+\.[^.]+$', '')
+                 | select('ne', '@')
+                 | unique 
+                 | sort
+                 | list }}
+          when: dns_records_results is defined
+          
+        - name: Build final record list
+          set_fact:
+            record_list: "{{ (all_record_names[:50] if all_record_names is defined else []) + ['[NONE]', '[REFRESH_NEEDED]'] }}"
+          
+        - name: Use fallback record list if needed
+          set_fact:
+            record_list: ["[NONE]", "[REFRESH_NEEDED]"]
+          when: record_list is not defined or record_list | length <= 2
+          
+        - name: Update survey with new dropdown choices
+          set_fact:
+            updated_survey: >-
+              {{ current_survey.json | combine({
+                'spec': current_survey.json.spec | map('combine', {
+                  'choices': domain_list
+                } if item.variable == 'existing_domain' else (
+                  {'choices': record_list} if item.variable == 'existing_record' else {}
+                )) | list
+              }) }}
+          
+        - name: Apply updated survey to AWX
+          uri:
+            url: "http://{{ awx_host }}/api/v2/job_templates/{{ awx_template_id }}/survey_spec/"
+            method: POST
+            user: "{{ awx_username }}"
+            password: "{{ awx_password }}"
+            force_basic_auth: true
+            body_format: json
+            body: "{{ updated_survey }}"
+            return_content: true
+          register: survey_update_result
           
         - name: Display update results
           debug:
             msg:
-              - "✅ Survey update completed successfully!"
-              - "📊 Execution time: {{ ansible_date_time.iso8601 }}"
-              - "🔄 Survey dropdowns refreshed with latest Cloudflare data"
-              - ""
-              - "📝 Next scheduled update recommendations:"
-              - "   • Run this job hourly during business hours"
-              - "   • Run after major Cloudflare template executions"
-              - "   • Monitor logs for any API issues"
-          when: survey_update_output.rc == 0
-          
+              - "✅ Survey dropdowns updated successfully!"
+              - "📊 Statistics:"
+              - "   • Domains: {{ domain_list | length }} options"
+              - "   • Records: {{ record_list | length }} options"
+              - "   • Updated at: {{ ansible_date_time.iso8601 }}"
+              
       rescue:
-        - name: Handle update failure
+        - name: Handle update failures
           debug:
             msg:
-              - "❌ Survey update failed"
-              - "🔍 Error details:"
-              - "   Exit code: {{ survey_update_output.rc | default('unknown') }}"
-              - "   Error: {{ survey_update_output.stderr | default('No error details') }}"
-              - ""
-              - "🛠️  Troubleshooting steps:"
-              - "   1. Check Cloudflare API token availability"
-              - "   2. Verify AWX namespace access"
-              - "   3. Check script permissions and paths"
-              - "   4. Review /tmp/cloudflare-survey-update.log"
+              - "❌ Failed to update survey dropdowns"
+              - "Error: {{ ansible_failed_result.msg | default('Unknown error') }}"
+              - "Continuing with existing survey configuration..."
               
-        - name: Set failure status
-          fail:
-            msg: "Survey update job failed - check logs for details"
-            
     - name: Job completion summary
       debug:
         msg:
           - "════════════════════════════════════════════════════════════"
           - "AWX Survey Auto-Updater - Job Complete"
           - "Finished: {{ ansible_date_time.iso8601 }}"
-          - "Status: {{ 'SUCCESS' if survey_update_output.rc == 0 else 'FAILED' }}"
+          - "Status: {{ 'SUCCESS' if survey_update_result is defined and survey_update_result.json is defined else 'FAILED' }}"
           - "════════════════════════════════════════════════════════════"
