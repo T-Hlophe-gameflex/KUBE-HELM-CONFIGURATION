@@ -11,23 +11,30 @@ AWX_PASSWORD="${AWX_PASSWORD:-password}"
 AWX_TEMPLATE_ID="${AWX_TEMPLATE_ID:-21}"  # Cloudflare Template ID
 
 # New description reflecting current capabilities
-NEW_DESCRIPTION="Comprehensive Cloudflare DNS and configuration management automation with modular task structure. Supports DNS record operations (create, update, delete, clone), domain management, zone settings configuration, and platform-wide synchronization. Features dynamic survey dropdowns, intelligent label management, and clean execution summaries for optimal user experience."
+NEW_DESCRIPTION="Cloudflare configuration management. Streamlined DNS operations, zone settings, and domain administration with intelligent automation."
 
-echo "Updating AWX Job Template #${AWX_TEMPLATE_ID} description..."
+# New template name
+NEW_NAME="Cloudflare - Automation"
 
-# Update the job template description
+echo "Updating AWX Job Template #${AWX_TEMPLATE_ID} name and description..."
+
+# Get AWX admin password from Kubernetes
+AWX_PASSWORD=$(kubectl get secret ansible-awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 -d)
+
+# Update the job template description and name
 HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/template_update_response.json \
   -X PATCH "http://${AWX_HOST}/api/v2/job_templates/${AWX_TEMPLATE_ID}/" \
-  -H "Authorization: Basic $(echo -n "${AWX_USERNAME}:${AWX_PASSWORD}" | base64)" \
+  -u "admin:${AWX_PASSWORD}" \
   -H "Content-Type: application/json" \
-  -d "{\"description\": \"${NEW_DESCRIPTION}\"}")
+  -d "{\"description\": \"${NEW_DESCRIPTION}\", \"name\": \"${NEW_NAME}\"}")
 
 if [[ "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
-    echo "✓ Successfully updated job template description"
+    echo "✓ Successfully updated job template name and description"
     echo "  Template ID: ${AWX_TEMPLATE_ID}"
+    echo "  New Name: ${NEW_NAME}"
     echo "  New Description: ${NEW_DESCRIPTION}"
 else
-    echo "✗ Failed to update job template description (HTTP ${HTTP_CODE})"
+    echo "✗ Failed to update job template (HTTP ${HTTP_CODE})"
     if [[ -f /tmp/template_update_response.json ]]; then
         echo "Error response:"
         cat /tmp/template_update_response.json
@@ -38,4 +45,4 @@ fi
 # Clean up
 rm -f /tmp/template_update_response.json
 
-echo "Job template description update completed successfully."
+echo "Job template name and description update completed successfully."
