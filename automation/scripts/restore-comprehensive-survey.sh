@@ -99,7 +99,7 @@ COMPREHENSIVE_SURVEY=$(cat << EOF
       "default": ""
     },
     {
-      "question_name": "New Record Name",
+      "question_name": "Record Name",
       "question_description": "Name of the DNS record to create/update",
       "required": false,
       "type": "text", 
@@ -125,7 +125,7 @@ COMPREHENSIVE_SURVEY=$(cat << EOF
       "default": "A"
     },
     {
-      "question_name": "Record Content/Value",
+      "question_name": "Record Value",
       "question_description": "Record content (IP, hostname, text value, etc.)",
       "required": false,
       "type": "text",
@@ -159,16 +159,7 @@ COMPREHENSIVE_SURVEY=$(cat << EOF
       "type": "multiplechoice",
       "variable": "global_proxied",
       "choices": ["true", "false"],
-      "default": "false"
-    },
-    {
-      "question_name": "Rule to Apply",
-      "question_description": "Page rule action to apply",
-      "required": false,
-      "type": "multiplechoice",
-      "variable": "rule_action",
-      "choices": ["force_https", "browser_cache_ttl", "edge_cache_ttl", "cache_level", "bypass_cache_on_cookie"],
-      "default": "force_https"
+      "default": "true"
     },
     {
       "question_name": "Edge Cache TTL",

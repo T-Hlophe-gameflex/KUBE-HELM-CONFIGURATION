@@ -32,4 +32,4 @@
 - name: Set TTL and proxied defaults
   set_fact:
     numeric_ttl: "{{ global_ttl | default(3600) | int }}"
-    effective_proxied: "{{ record_proxied | default(proxied | default(global_proxied | default(false))) | bool }}"
+    effective_proxied: "{{ record_proxied | default(proxied | default(global_proxied | default(true))) | bool }}"

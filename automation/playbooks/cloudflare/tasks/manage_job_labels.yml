@@ -36,7 +36,7 @@
       organization: 1
     return_content: true
     validate_certs: false
-    status_code: [200, 201, 400]  # 400 if already exists
+    status_code: [200, 201, 400]
   register: action_label_result
   ignore_errors: true
 
@@ -53,7 +53,7 @@
       organization: 1
     return_content: true
     validate_certs: false
-    status_code: [200, 201, 400]  # 400 if already exists
+    status_code: [200, 201, 400]
   register: type_label_result
   when: 
     - record_type is defined
@@ -73,7 +73,7 @@
       organization: 1
     return_content: true
     validate_certs: false
-    status_code: [200, 201, 400]  # 400 if already exists
+    status_code: [200, 201, 400]
   register: domain_label_result
   when: 
     - resolved_domain is defined
@@ -83,8 +83,69 @@
 
 - name: Display label creation results
   debug:
-    msg:
-      - "📋 AWX Job Labels Created:"
-      - "  Action Label: {{ action_label }} - {{ 'CREATED' if action_label_result.status == 201 else ('EXISTS' if action_label_result.status == 400 else 'UNKNOWN') }}"
-      - "  Type Label: {{ record_type | upper | default('N/A') }} - {{ 'CREATED' if type_label_result.status | default(0) == 201 else ('EXISTS' if type_label_result.status | default(0) == 400 else 'SKIPPED') }}"
-      - "  Domain Label: {{ resolved_domain | upper | replace('.', '-') | default('N/A') }} - {{ 'CREATED' if domain_label_result.status | default(0) == 201 else ('EXISTS' if domain_label_result.status | default(0) == 400 else 'SKIPPED') }}"
+    msg: "Labels applied: {{ action_label }}{{ ', ' + record_type | upper if record_type is defined and cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record'] else '' }}{{ ', ' + resolved_domain | upper | replace('.', '-') if resolved_domain is defined and resolved_domain | length > 0 and resolved_domain != 'undefined' else '' }}"
+
+- name: Apply labels to current job
+  uri:
+    url: "http://localhost:8052/api/v2/jobs/{{ tower_job_id }}/labels/"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      id: "{{ action_label_result.json.id }}"
+    validate_certs: false
+    status_code: [200, 201, 204, 400]
+  register: job_label_apply_result
+  when: 
+    - tower_job_id is defined
+    - action_label_result is defined
+    - action_label_result.json is defined
+    - action_label_result.json.id is defined
+  ignore_errors: true
+
+- name: Apply record type label to current job
+  uri:
+    url: "http://localhost:8052/api/v2/jobs/{{ tower_job_id }}/labels/"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      id: "{{ type_label_result.json.id }}"
+    validate_certs: false
+    status_code: [200, 201, 204, 400]
+  register: job_type_label_apply_result
+  when: 
+    - tower_job_id is defined
+    - type_label_result is defined
+    - type_label_result.json is defined
+    - type_label_result.json.id is defined
+    - record_type is defined
+    - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
+  ignore_errors: true
+
+- name: Apply domain label to current job
+  uri:
+    url: "http://localhost:8052/api/v2/jobs/{{ tower_job_id }}/labels/"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      id: "{{ domain_label_result.json.id }}"
+    validate_certs: false
+    status_code: [200, 201, 204, 400]
+  register: job_domain_label_apply_result
+  when: 
+    - tower_job_id is defined
+    - domain_label_result is defined
+    - domain_label_result.json is defined
+    - domain_label_result.json.id is defined
+    - resolved_domain is defined
+    - resolved_domain | length > 0
+    - resolved_domain != 'undefined'
+  ignore_errors: true
