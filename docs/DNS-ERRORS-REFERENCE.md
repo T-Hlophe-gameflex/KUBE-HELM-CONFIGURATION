@@ -66,6 +66,68 @@ record_value: 203.0.113.50
 
 ---
 
+### Error 9005: Content for A record must be a valid IPv4 address
+
+**What it means**: You're trying to create an A record with content that isn't a valid IPv4 address (e.g., hostname instead of IP).
+
+**Example of invalid configuration**:
+```yaml
+record_type: A
+record_value: example.com  # ❌ Hostname, not IP!
+```
+
+**How to fix**:
+
+**Option 1**: Use a CNAME record instead (if pointing to hostname)
+```yaml
+record_type: CNAME
+record_value: example.com  # ✅
+```
+
+**Option 2**: Use the correct IP address
+```yaml
+record_type: A
+record_value: 203.0.113.10  # ✅
+```
+
+**Validation**: The playbook now automatically detects invalid IPv4 addresses before making the API call.
+
+**Common mistakes**:
+- Using hostname instead of IP: `example.com` → Should be `203.0.113.10`
+- Using IPv6 for A record: `2001:db8::1` → Use AAAA record instead
+- Typos in IP: `192.168.1` (missing octet) → Should be `192.168.1.1`
+- Invalid octets: `999.999.999.999` → Each octet must be 0-255
+
+---
+
+### Error 9006: Content for AAAA record must be a valid IPv6 address
+
+**What it means**: You're trying to create an AAAA record with content that isn't a valid IPv6 address.
+
+**Example of invalid configuration**:
+```yaml
+record_type: AAAA
+record_value: 192.168.1.1  # ❌ IPv4, not IPv6!
+```
+
+**How to fix**:
+
+**Option 1**: Use an A record for IPv4
+```yaml
+record_type: A
+record_value: 192.168.1.1  # ✅
+```
+
+**Option 2**: Use valid IPv6 address
+```yaml
+record_type: AAAA
+record_value: 2001:0db8:85a3::8a2e:0370:7334  # ✅
+```
+
+**Validation**: The playbook validates IPv6 format before making the API call.
+
+---
+
 ### Error 1004: DNS Validation Error
 
 **What it means**: Invalid DNS record content for the specified record type.
@@ -248,6 +310,8 @@ Configure AWX surveys with:
 
 | Error Code | Error Message | Solution |
 |------------|---------------|----------|
+| 9005 | Content for A record must be valid IPv4 | Use valid IP or change to CNAME for hostnames |
+| 9006 | Content for AAAA record must be valid IPv6 | Use valid IPv6 or change to A for IPv4 |
 | 9039 | CNAME content cannot reference itself | Use different target or A record |
 | 81053 | A/AAAA/CNAME record already exists | Use update_record or let auto-convert handle it |
 | 81058 | Record already exists | Use update_record action |
