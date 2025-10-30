@@ -24,10 +24,10 @@
     - name: Determine source record name for discovery
       set_fact:
         source_record_name: >-
-          {%- if record_name is defined and (record_name | trim) != '' -%}
-            {{ record_name | trim }}
-          {%- elif existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' -%}
+          {%- if existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) != '[NONE]' and (existing_record | trim) != '[REFRESH_NEEDED]' -%}
             {{ existing_record | trim }}
+          {%- elif record_name is defined and (record_name | trim) != '' -%}
+            {{ record_name | trim }}
           {%- else -%}
             {{ resolved_record_name }}
           {%- endif -%}
