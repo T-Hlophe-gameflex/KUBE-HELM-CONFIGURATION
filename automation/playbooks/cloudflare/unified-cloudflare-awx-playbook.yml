@@ -700,6 +700,23 @@
             - record_value is defined
             - record_value is match('^\\d+\\.\\d+\\.\\d+\\.\\d+$')
 
+        - name: Validate CNAME target does not reference itself
+          fail:
+            msg: |
+              CNAME content cannot reference itself.
+              Record name: {{ fq_record_name }}
+              CNAME target: {{ record_value }}
+              
+              A CNAME record cannot point to itself or create a circular reference.
+              Please use a different target hostname.
+          when:
+            - cf_action in ['create_record', 'update_record']
+            - record_type is defined
+            - record_type == 'CNAME'
+            - record_value is defined
+            - fq_record_name is defined
+            - (record_value | lower | trim | regex_replace('\\.$', '')) == (fq_record_name | lower | trim | regex_replace('\\.$', ''))
+
         - name: Fallback to curl if uri call failed
           shell: >-
             curl -sS {{ '-k' if cf_curl_insecure | default(false) else '' }} -X {{ 'PUT' if cf_action == 'update_record' and (record_id | default('')) != '' else 'POST' }} "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records{{ '/' ~ (record_id | default('')) if (record_id | default('')) != '' and cf_action == 'update_record' else '' }}" \
