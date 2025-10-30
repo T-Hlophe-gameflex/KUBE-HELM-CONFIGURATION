@@ -37,7 +37,7 @@
     - name: Display clone setup
       debug:
         msg:
-          - "🔍 STARTING AUTO-DISCOVERY CLONE:"
+          - "  STARTING AUTO-DISCOVERY CLONE:"
           - "  Looking for record: {{ source_record_name | default('undefined') }}"
           - "  Record type: {{ record_type | default('A') }}"
           - "  Target domain: {{ resolved_domain | default('undefined') }}"
@@ -108,7 +108,7 @@
     - name: Validate clone prerequisites
       fail:
         msg: |
-          ❌ CLONE OPERATION FAILED - SOURCE RECORD NOT FOUND!
+          CLONE OPERATION FAILED - SOURCE RECORD NOT FOUND!
           
           Searched for: {{ source_record_name }} ({{ record_type | default('A') }} record)
           Target domain: {{ resolved_domain }}
@@ -174,7 +174,7 @@
     - name: Display clone details
       debug:
         msg:
-          - "📋 Cloning record from {{ source_domain | default(resolved_domain) }} to {{ resolved_domain }}"
+          - "  Cloning record from {{ source_domain | default(resolved_domain) }} to {{ resolved_domain }}"
           - "  Source: {{ source_fq_record_name }} ({{ found_source_record.type | default('N/A') }})"
           - "  Target: {{ fq_record_name }} ({{ found_source_record.type | default(record_type) }})"
           - "  Content: {{ found_source_record.content | default('N/A') }}"
