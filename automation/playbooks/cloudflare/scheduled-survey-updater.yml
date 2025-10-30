@@ -3,7 +3,7 @@
   connection: local
   gather_facts: true
   vars:
-    awx_host: "{{ ansible_host | default('localhost:8052') }}"
+    awx_host: "{{ ansible_host | default('ansible-awx-service.awx.svc.cluster.local') }}"
     awx_template_id: "{{ template_id | default('21') }}"
     awx_username: "admin"
     
