@@ -1,0 +1,75 @@
+---
+# Manage AWX Job Labels Task
+# Creates and applies labels to AWX jobs based on the action being performed
+
+- name: Determine action label based on cf_action
+  set_fact:
+    action_label: >-
+      {%- if cf_action == 'create_record' -%}
+        CREATE
+      {%- elif cf_action == 'update_record' -%}
+        UPDATE
+      {%- elif cf_action == 'delete_record' -%}
+        DELETE
+      {%- elif cf_action == 'clone_record' -%}
+        CLONE
+      {%- elif cf_action == 'create_domain' -%}
+        CREATE-DOMAIN
+      {%- elif cf_action == 'update_settings' -%}
+        UPDATE-SETTINGS
+      {%- elif cf_action == 'sync' -%}
+        SYNC
+      {%- else -%}
+        {{ cf_action | upper | default('UNKNOWN') }}
+      {%- endif -%}
+
+- name: Create action-specific label
+  awx.awx.label:
+    controller_host: "{{ awx_host | default('http://localhost:8052') }}"
+    controller_username: "{{ awx_username | default('admin') }}"
+    controller_password: "{{ awx_password | default(lookup('env', 'AWX_PASSWORD')) }}"
+    validate_certs: false
+    name: "{{ action_label }}"
+    organization: "Default"
+    state: present
+  register: action_label_result
+  ignore_errors: true
+
+- name: Create record type label (if applicable)
+  awx.awx.label:
+    controller_host: "{{ awx_host | default('http://localhost:8052') }}"
+    controller_username: "{{ awx_username | default('admin') }}"
+    controller_password: "{{ awx_password | default(lookup('env', 'AWX_PASSWORD')) }}"
+    validate_certs: false
+    name: "{{ record_type | upper }}"
+    organization: "Default"
+    state: present
+  register: type_label_result
+  when: 
+    - record_type is defined
+    - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
+  ignore_errors: true
+
+- name: Create domain label
+  awx.awx.label:
+    controller_host: "{{ awx_host | default('http://localhost:8052') }}"
+    controller_username: "{{ awx_username | default('admin') }}"
+    controller_password: "{{ awx_password | default(lookup('env', 'AWX_PASSWORD')) }}"
+    validate_certs: false
+    name: "{{ resolved_domain | upper | replace('.', '-') }}"
+    organization: "Default"
+    state: present
+  register: domain_label_result
+  when: 
+    - resolved_domain is defined
+    - resolved_domain | length > 0
+    - resolved_domain != 'undefined'
+  ignore_errors: true
+
+- name: Display label creation results
+  debug:
+    msg:
+      - "📋 AWX Job Labels Created:"
+      - "  Action Label: {{ action_label }} - {{ 'SUCCESS' if action_label_result.changed | default(false) else 'EXISTS' }}"
+      - "  Type Label: {{ record_type | upper | default('N/A') }} - {{ 'SUCCESS' if type_label_result.changed | default(false) else 'EXISTS/SKIPPED' }}"
+      - "  Domain Label: {{ resolved_domain | upper | replace('.', '-') | default('N/A') }} - {{ 'SUCCESS' if domain_label_result.changed | default(false) else 'EXISTS/SKIPPED' }}"

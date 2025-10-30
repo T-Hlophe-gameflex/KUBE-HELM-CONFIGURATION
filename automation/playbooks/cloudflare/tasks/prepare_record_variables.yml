@@ -1,0 +1,35 @@
+---
+# Prepare DNS Record Variables Task
+# Builds variables needed for DNS record operations
+
+- name: Prepare record variables
+  set_fact:
+    effective_record_name: "{{ resolved_record_name | default('') | trim | replace('\"','') | replace(\"'\",'') | regex_replace('\\s+',' ') }}"
+
+- name: Debug record name construction
+  debug:
+    msg:
+      - "  RECORD NAME DEBUG:"
+      - "  resolved_record_name: '{{ resolved_record_name | default('UNDEFINED') }}'"
+      - "  effective_record_name: '{{ effective_record_name | default('UNDEFINED') }}'"
+      - "  resolved_domain: '{{ resolved_domain | default('UNDEFINED') }}'"
+
+- name: Build fully-qualified record name
+  set_fact:
+    fq_record_name: >-
+      {%- if effective_record_name is defined and effective_record_name | length > 0 -%}
+      {%- if effective_record_name | regex_search('\.' ~ resolved_domain ~ '$') -%}
+      {{ effective_record_name | trim }}
+      {%- elif effective_record_name == '@' -%}
+      {{ resolved_domain }}
+      {%- else -%}
+      {{ (effective_record_name | trim) ~ '.' ~ resolved_domain }}
+      {%- endif -%}
+      {%- else -%}
+      {{ resolved_domain }}
+      {%- endif -%}
+
+- name: Set TTL and proxied defaults
+  set_fact:
+    numeric_ttl: "{{ global_ttl | default(3600) | int }}"
+    effective_proxied: "{{ record_proxied | default(proxied | default(global_proxied | default(false))) | bool }}"
