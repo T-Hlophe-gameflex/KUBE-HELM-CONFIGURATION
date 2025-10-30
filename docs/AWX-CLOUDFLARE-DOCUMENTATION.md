@@ -31,8 +31,8 @@ This document provides comprehensive information about the AWX Cloudflare automa
 
 | Field Name | Variable | Type | Default Value | Description |
 |------------|----------|------|---------------|-------------|
-| Action | `cf_action` | multiplechoice | `create_record` | Operation to perform (create/update/delete/clone/create_domain/update_settings/sync) |
-| Domain | `existing_domain` | multiplechoice | `efutechnologies.co.za` | Domain selection from Cloudflare account |
+| Action | `cf_action` | multiplechoice | `create_record` | Operation to perform (create/update/delete/clone/create_domain/update_settings) |
+| Domain | `existing_domain` | multiplechoice |`[DOMAINS]` | Domain selection from Cloudflare account |
 | Manual Domain Entry | `manual_domain` | text | *(empty)* | Manual domain entry when not in dropdown |
 | Record Name | `record_name` | text | *(empty)* | DNS record name/subdomain |
 | Existing Record | `existing_record` | multiplechoice | `[NONE]` | Existing record selection (populated dynamically) |
@@ -159,27 +159,6 @@ The AWX survey configuration is managed through a consolidated script that handl
 - Zone settings: `tasks/update_zone_settings.yml`
 - Record settings: `tasks/update_record_settings.yml`
 
-### Platform Operations
-
-#### sync
-**Purpose**: Apply standardized configuration across all domains
-**Status**: ⚠️ **Implementation Incomplete**
-
-**Current Process**:
-1. Retrieves all zones in Cloudflare account via API
-2. **Note**: References missing file `apply-standard-records.yml`
-3. Would loop through zones to apply standard configurations
-
-**Known Issues**:
-- Missing implementation file: `apply-standard-records.yml`
-- Standard records variable `standard_records` not defined
-- Sync action will fail until implementation is completed
-
-**Files Involved**:
-- Main sync logic: `cloudflare_awx_playbook.yml` (sync block)
-- **Missing**: `apply-standard-records.yml` (referenced but does not exist)
-- **Available but unused**: `helm-charts/charts/awx/config/cloudflare-standards.yml` (standards definition exists but not referenced in playbook)
-
 ## Settings Management
 
 ### Zone-Level Settings
@@ -240,7 +219,7 @@ The AWX survey configuration is managed through a consolidated script that handl
 **File**: `tasks/manage_job_labels.yml`
 
 **Label Types**:
-- Action labels: CREATE, UPDATE, DELETE, CLONE, UPDATE-SETTINGS, SYNC
+- Action labels: CREATE, UPDATE, DELETE, CLONE, UPDATE-SETTINGS
 - Record type labels: A, AAAA, CNAME, MX, TXT, SRV
 - Domain labels: DOMAIN-NAME (dots replaced with hyphens)
 
