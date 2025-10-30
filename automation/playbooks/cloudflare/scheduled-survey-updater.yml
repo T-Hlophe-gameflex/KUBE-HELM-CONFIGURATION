@@ -3,9 +3,9 @@
   connection: local
   gather_facts: true
   vars:
-    awx_host: "{{ ansible_host | default('ansible-awx-service.awx.svc.cluster.local') }}"
-    awx_template_id: "{{ template_id | default('21') }}"
-    awx_username: "admin"
+    awx_host: "ansible-awx-service.awx.svc.cluster.local"
+    awx_port: "80"
+    awx_template_id: "21"
     
   tasks:
     - name: Get AWX admin password
