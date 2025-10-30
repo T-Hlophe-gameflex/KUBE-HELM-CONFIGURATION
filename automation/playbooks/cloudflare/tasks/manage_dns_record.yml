@@ -125,7 +125,7 @@
         clone_payload_json: >-
           {{ ({'type': found_source_record.type | default(record_type),
                'name': fq_record_name,
-               'content': (record_value | default(found_source_record.content | default('')) | regex_replace('^"', '') | regex_replace('"$', '')),
+               'content': (record_value if (record_value is defined and record_value | length > 0) else (found_source_record.content | default(''))),
                'ttl': (record_ttl | default(found_source_record.ttl | default(3600)) | int),
                'priority': found_source_record.priority | default(omit) }
              ) | combine({'proxied': (record_proxied | default(found_source_record.proxied | default(false)) | bool) } if (found_source_record.type | default(record_type)) in ['A','AAAA','CNAME'] else {})
