@@ -28,6 +28,7 @@ usage() {
     echo "  apply-survey        Apply improved survey configuration to AWX template"
     echo "  verify-changes      Verify that survey changes have been applied"
     echo "  update-template     Update template name and description"
+    echo "  update-dropdowns    Update survey dropdowns with live Cloudflare data"
     echo "  show-current        Display current survey configuration"
     echo "  help               Show this help message"
     echo ""
@@ -35,10 +36,14 @@ usage() {
     echo "  --template-id ID   AWX template ID (default: 21)"
     echo "  --host HOST        AWX host (default: localhost:8052)"
     echo ""
+    echo "Environment Variables (for update-dropdowns):"
+    echo "  CLOUDFLARE_API_TOKEN    Your Cloudflare API token (required for update-dropdowns)"
+    echo ""
     echo "Examples:"
     echo "  $0 apply-survey"
     echo "  $0 verify-changes"
     echo "  $0 update-template"
+    echo "  CLOUDFLARE_API_TOKEN='your_token' $0 update-dropdowns"
     echo "  $0 show-current"
 }
 
@@ -324,6 +329,139 @@ show_current() {
     curl -s -u "admin:${AWX_PASSWORD}" "http://${AWX_HOST}/api/v2/job_templates/${AWX_TEMPLATE_ID}/survey_spec/" | jq -r '.spec[] | "\(.question_name): \(.variable) | Type: \(.type) | Default: \(.default // "none")"'
 }
 
+# Fetch domains from Cloudflare
+fetch_cloudflare_domains() {
+    if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+        echo -e "${RED}Error: CLOUDFLARE_API_TOKEN environment variable not set${NC}"
+        echo "Please set your Cloudflare API token:"
+        echo "export CLOUDFLARE_API_TOKEN='your_token_here'"
+        exit 1
+    fi
+    
+    echo "🌐 Fetching domains from Cloudflare..."
+    DOMAINS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones" \
+        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        -H "Content-Type: application/json")
+    
+    if [[ $(echo "$DOMAINS_RESPONSE" | jq -r '.success') != "true" ]]; then
+        echo -e "${RED}❌ Failed to fetch domains from Cloudflare${NC}"
+        echo "Error: $(echo "$DOMAINS_RESPONSE" | jq -r '.errors[0].message // "Unknown error"')"
+        exit 1
+    fi
+    
+    # Extract domain names and create choices array
+    CLOUDFLARE_DOMAINS=$(echo "$DOMAINS_RESPONSE" | jq -r '.result[].name' | sort | jq -R . | jq -s .)
+    DOMAINS_COUNT=$(echo "$CLOUDFLARE_DOMAINS" | jq length)
+    
+    echo -e "${GREEN}✅ Found ${DOMAINS_COUNT} domains in Cloudflare account${NC}"
+    echo "$CLOUDFLARE_DOMAINS" | jq -r '.[]' | sed 's/^/  - /'
+}
+
+# Fetch DNS records from all zones
+fetch_cloudflare_records() {
+    echo "📋 Fetching DNS records from all zones..."
+    
+    # Get zone IDs
+    ZONE_IDS=$(echo "$DOMAINS_RESPONSE" | jq -r '.result[].id')
+    ALL_RECORDS='[]'
+    
+    while IFS= read -r zone_id; do
+        if [[ -n "$zone_id" ]]; then
+            RECORDS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H "Content-Type: application/json")
+            
+            if [[ $(echo "$RECORDS_RESPONSE" | jq -r '.success') == "true" ]]; then
+                # Extract record names and merge with existing
+                ZONE_RECORDS=$(echo "$RECORDS_RESPONSE" | jq -r '.result[].name')
+                while IFS= read -r record_name; do
+                    if [[ -n "$record_name" ]]; then
+                        ALL_RECORDS=$(echo "$ALL_RECORDS" | jq ". + [\"$record_name\"]")
+                    fi
+                done <<< "$ZONE_RECORDS"
+            fi
+        fi
+    done <<< "$ZONE_IDS"
+    
+    # Remove duplicates, sort, and add default options
+    CLOUDFLARE_RECORDS=$(echo "$ALL_RECORDS" | jq 'unique | ["[NONE]", "[REFRESH_NEEDED]"] + .')
+    RECORDS_COUNT=$(echo "$CLOUDFLARE_RECORDS" | jq 'length - 2')  # Subtract the 2 default options
+    
+    echo -e "${GREEN}✅ Found ${RECORDS_COUNT} unique DNS records across all zones${NC}"
+    echo "$CLOUDFLARE_RECORDS" | jq -r '.[]' | head -10 | sed 's/^/  - /'
+    if [[ $RECORDS_COUNT -gt 8 ]]; then
+        echo "  ... and $((RECORDS_COUNT - 8)) more records"
+    fi
+}
+
+# Update survey dropdowns with Cloudflare data
+update_dropdowns() {
+    echo -e "${BLUE}🔄 Updating Survey Dropdowns with Cloudflare Data...${NC}"
+    echo "=================================================="
+    
+    get_awx_credentials
+    
+    # Fetch data from Cloudflare
+    fetch_cloudflare_domains
+    fetch_cloudflare_records
+    
+    echo "📋 Getting current survey configuration..."
+    CURRENT_SURVEY=$(curl -s -u "admin:${AWX_PASSWORD}" "http://${AWX_HOST}/api/v2/job_templates/${AWX_TEMPLATE_ID}/survey_spec/")
+    
+    if [[ "$CURRENT_SURVEY" == *'"spec":'* ]]; then
+        echo -e "${GREEN}✅ Successfully retrieved current survey${NC}"
+    else
+        echo -e "${RED}❌ Failed to get current survey configuration${NC}"
+        exit 1
+    fi
+    
+    echo "🔧 Creating updated survey with Cloudflare data..."
+    
+    # Merge static domain choices with Cloudflare domains
+    STATIC_DOMAINS='["efustryton.co.za", "efutechnologies.co.za", "[MANUAL_ENTRY]"]'
+    MERGED_DOMAINS=$(echo "$STATIC_DOMAINS $CLOUDFLARE_DOMAINS" | jq -s 'add | unique')
+    
+    # Update survey spec with new domain and record choices
+    UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson domains "$MERGED_DOMAINS" --argjson records "$CLOUDFLARE_RECORDS" '
+        .spec |= map(
+            if .variable == "existing_domain" then
+                .choices = $domains
+            elif .variable == "existing_record" then
+                .choices = $records
+            else
+                .
+            end
+        )
+    ')
+    
+    echo "🔄 Applying updated survey configuration..."
+    HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/dropdown_update_response.json \
+      -X POST "http://${AWX_HOST}/api/v2/job_templates/${AWX_TEMPLATE_ID}/survey_spec/" \
+      -u "admin:${AWX_PASSWORD}" \
+      -H "Content-Type: application/json" \
+      -d "$UPDATED_SURVEY")
+    
+    if [[ "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
+        echo -e "${GREEN}✅ Successfully updated survey dropdowns!${NC}"
+        echo ""
+        echo -e "${BLUE}🎯 Dropdown Updates Applied:${NC}"
+        echo "   ✅ Domain dropdown: $(echo "$MERGED_DOMAINS" | jq length) total domains"
+        echo "   ✅ Existing Record dropdown: $(echo "$CLOUDFLARE_RECORDS" | jq length) total records"
+        echo "   ✅ Includes static domains + live Cloudflare data"
+        echo ""
+        echo -e "${YELLOW}💡 Survey dropdowns are now synchronized with your Cloudflare account!${NC}"
+    else
+        echo -e "${RED}❌ Failed to update survey dropdowns (HTTP ${HTTP_CODE})${NC}"
+        if [[ -f /tmp/dropdown_update_response.json ]]; then
+            echo "Error response:"
+            cat /tmp/dropdown_update_response.json
+        fi
+        exit 1
+    fi
+    
+    rm -f /tmp/dropdown_update_response.json
+}
+
 # Main execution
 main() {
     case "${1:-help}" in
@@ -335,6 +473,9 @@ main() {
             ;;
         update-template)
             update_template
+            ;;
+        update-dropdowns)
+            update_dropdowns
             ;;
         show-current)
             show_current

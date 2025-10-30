@@ -61,6 +61,9 @@ The AWX survey configuration is managed through a consolidated script that handl
 # Update template name and description
 ./scripts/awx_survey_manager.sh update-template
 
+# Update survey dropdowns with live Cloudflare data
+CLOUDFLARE_API_TOKEN='your_token' ./scripts/awx_survey_manager.sh update-dropdowns
+
 # Show current survey configuration
 ./scripts/awx_survey_manager.sh show-current
 ```
@@ -68,8 +71,38 @@ The AWX survey configuration is managed through a consolidated script that handl
 **Key Features**:
 - Consolidates all survey management functionality
 - Professional field names and descriptions
+- **Dynamic dropdown updates with live Cloudflare data**
 - Comprehensive error handling and status reporting
 - Template branding and description updates
+
+### Dynamic Survey Dropdowns
+
+The survey manager now includes powerful **live data synchronization** with your Cloudflare account:
+
+**🌐 Automatic Dropdown Updates**:
+- Fetches all domains (zones) from your Cloudflare account
+- Retrieves all DNS records across all zones
+- Updates AWX survey dropdowns with current data
+- Merges with existing static domain choices
+
+**Usage**:
+```bash
+# Set your Cloudflare API token
+export CLOUDFLARE_API_TOKEN="your_api_token_here"
+
+# Update survey dropdowns with live data
+./scripts/awx_survey_manager.sh update-dropdowns
+```
+
+**What Gets Updated**:
+- **Domain Dropdown**: Combines static domains (`efustryton.co.za`, `efutechnologies.co.za`) with all Cloudflare zones
+- **Existing Record Dropdown**: Populates with all DNS records from all zones in your account
+
+**Benefits**:
+- ✅ Always current domain and record lists
+- ✅ No manual typing of domain/record names
+- ✅ Eliminates typos and errors
+- ✅ Click-to-select from live Cloudflare data
 
 ## Available Actions
 
@@ -262,10 +295,15 @@ automation/playbooks/cloudflare/
 ### Management Scripts
 ```
 scripts/
-├── apply_survey_improvements.sh         # Update survey config
-├── verify_awx_changes.sh                # Verify changes
-├── update_awx_template_description.sh   # Update template info
-└── apply_survey_updates.sh              # Apply survey changes
+├── awx_survey_manager.sh                # Unified survey management (NEW)
+│   ├── apply-survey                     # Update survey config
+│   ├── verify-changes                   # Verify changes
+│   ├── update-template                  # Update template info
+│   ├── update-dropdowns                 # Sync with Cloudflare (NEW)
+│   └── show-current                     # Display current config
+├── apply_survey_improvements.sh         # Legacy script
+├── verify_awx_changes.sh                # Legacy script
+└── update_awx_template_description.sh   # Legacy script
 ```
 
 ### Configuration Files
