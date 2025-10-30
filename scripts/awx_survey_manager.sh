@@ -91,8 +91,7 @@ apply_survey() {
             "update_record", 
             "delete_record",
             "clone_record",
-            "create_domain",
-            "update_settings"
+            "create_domain"
           ],
           "default": "create_record"
         },

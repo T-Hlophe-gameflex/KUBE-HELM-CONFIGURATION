@@ -31,7 +31,7 @@ This document provides comprehensive information about the AWX Cloudflare automa
 
 | Field Name | Variable | Type | Default Value | Description |
 |------------|----------|------|---------------|-------------|
-| Action | `cf_action` | multiplechoice | `create_record` | Operation to perform (create/update/delete/clone/create_domain/update_settings) |
+| Action | `cf_action` | multiplechoice | `create_record` | Operation to perform (create/update/delete/clone/create_domain) |
 | Domain | `existing_domain` | multiplechoice |`[DOMAINS]` | Domain selection from Cloudflare account |
 | Manual Domain Entry | `manual_domain` | text | *(empty)* | Manual domain entry when not in dropdown |
 | Record Name | `record_name` | text | *(empty)* | DNS record name/subdomain |
@@ -169,29 +169,6 @@ export CLOUDFLARE_API_TOKEN="your_api_token_here"
 - Zone setup: `tasks/apply_zone_settings.yml`
 - Standards application: `helm-charts/charts/awx/config/cloudflare-standards.yml`
 
-#### update_settings
-**Purpose**: Modify Cloudflare configurations at different levels
-**Process**: Depends on settings_level parameter
-
-**Zone Level** (`settings_level: zone`):
-- SSL/TLS configuration
-- Security settings
-- Performance optimizations
-- Protocol support
-
-**Record Level** (`settings_level: record`):
-- TTL modifications
-- Proxy status changes
-- Content updates
-
-**Account Level** (`settings_level: account`):
-- Account-wide security policies
-- Global access control settings
-
-**Files Involved**:
-- Zone settings: `tasks/update_zone_settings.yml`
-- Record settings: `tasks/update_record_settings.yml`
-
 ## Settings Management
 
 ### Zone-Level Settings
@@ -252,7 +229,7 @@ export CLOUDFLARE_API_TOKEN="your_api_token_here"
 **File**: `tasks/manage_job_labels.yml`
 
 **Label Types**:
-- Action labels: CREATE, UPDATE, DELETE, CLONE, UPDATE-SETTINGS
+- Action labels: CREATE, UPDATE, DELETE, CLONE
 - Record type labels: A, AAAA, CNAME, MX, TXT, SRV
 - Domain labels: DOMAIN-NAME (dots replaced with hyphens)
 
