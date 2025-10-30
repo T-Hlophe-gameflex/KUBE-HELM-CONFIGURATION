@@ -29,38 +29,47 @@ This document provides comprehensive information about the AWX Cloudflare automa
 
 ### Survey Fields
 
-| Field Name | Variable | Type | Purpose |
-|------------|----------|------|---------|
-| Action | cf_action | multiplechoice | Determines operation type |
-| Domain | existing_domain | multiplechoice | Target domain selection |
-| Manual Domain Entry | manual_domain | text | Custom domain input |
-| Record Name | record_name | text | DNS record hostname |
-| Existing Record | existing_record | multiplechoice | Select from existing records |
-| Record Type | record_type | multiplechoice | DNS record type (A, AAAA, CNAME, etc.) |
-| Record Value | record_value | text | Record content (IP, hostname, text) |
-| TTL | record_ttl | multiplechoice | Time to live settings |
-| Priority | record_priority | integer | MX/SRV record priority |
-| Proxy Through Cloudflare | global_proxied | multiplechoice | Enable Cloudflare proxy (default: true) |
-| Edge Cache TTL | edge_ttl_value | integer | Edge cache duration |
-| Cache Level | cache_level | multiplechoice | Cloudflare cache aggressiveness |
-| Security Level | security_level | multiplechoice | SSL/TLS security mode |
+| Field Name | Variable | Type | Default Value | Description |
+|------------|----------|------|---------------|-------------|
+| Action | `cf_action` | multiplechoice | `create_record` | Operation to perform (create/update/delete/clone/create_domain/update_settings/sync) |
+| Domain | `existing_domain` | multiplechoice | `efutechnologies.co.za` | Domain selection from Cloudflare account |
+| Manual Domain Entry | `manual_domain` | text | *(empty)* | Manual domain entry when not in dropdown |
+| Record Name | `record_name` | text | *(empty)* | DNS record name/subdomain |
+| Existing Record | `existing_record` | multiplechoice | `[NONE]` | Existing record selection (populated dynamically) |
+| Record Type | `record_type` | multiplechoice | `A` | DNS record type (A, AAAA, CNAME, MX, TXT, SRV) |
+| Record Value | `record_value` | text | *(empty)* | Record content (IP, hostname, text) |
+| TTL | `record_ttl` | multiplechoice | `auto` | Time to live setting |
+| Priority | `record_priority` | integer | `10` | Priority for MX/SRV records (0-65535) |
+| Proxy Through Cloudflare | `global_proxied` | multiplechoice | `true` | Enable Cloudflare proxy (orange cloud) |
+| Edge Cache TTL | `edge_ttl_value` | integer | `14400` | Edge cache TTL in seconds (0-31536000) |
+| Cache Level | `cache_level` | multiplechoice | `aggressive` | Cloudflare cache level |
+| Security Level | `security_level` | multiplechoice | `full` | SSL/TLS security setting |
 
 ### Survey Management
 
-**Update Survey Configuration**
+The AWX survey configuration is managed through a consolidated script that handles all survey-related operations:
+
+**Unified Survey Management Script**: `scripts/awx_survey_manager.sh`
+
 ```bash
-./scripts/apply_survey_improvements.sh
+# Apply improved survey configuration
+./scripts/awx_survey_manager.sh apply-survey
+
+# Verify current survey state
+./scripts/awx_survey_manager.sh verify-changes
+
+# Update template name and description
+./scripts/awx_survey_manager.sh update-template
+
+# Show current survey configuration
+./scripts/awx_survey_manager.sh show-current
 ```
 
-**Verify Survey Changes**
-```bash
-./scripts/verify_awx_changes.sh
-```
-
-**Update Template Name and Description**
-```bash
-./scripts/update_awx_template_description.sh
-```
+**Key Features**:
+- Consolidates all survey management functionality
+- Professional field names and descriptions
+- Comprehensive error handling and status reporting
+- Template branding and description updates
 
 ## Available Actions
 
@@ -143,8 +152,8 @@ This document provides comprehensive information about the AWX Cloudflare automa
 - Content updates
 
 **Account Level** (`settings_level: account`):
-- Account-wide policies
-- Billing and subscription management
+- Account-wide security policies
+- Global access control settings
 
 **Files Involved**:
 - Zone settings: `tasks/update_zone_settings.yml`
@@ -154,20 +163,22 @@ This document provides comprehensive information about the AWX Cloudflare automa
 
 #### sync
 **Purpose**: Apply standardized configuration across all domains
-**Process**:
-1. Retrieves all zones in Cloudflare account
-2. Applies standard record templates to each zone
-3. Ensures consistency across platform
-4. Reports completion statistics
+**Status**: ⚠️ **Implementation Incomplete**
 
-**Standard Records Applied**:
-- core-web: www A record for customer traffic
-- api-endpoint: api A record for service endpoints  
-- root-record: @ A record for domain apex
+**Current Process**:
+1. Retrieves all zones in Cloudflare account via API
+2. **Note**: References missing file `apply-standard-records.yml`
+3. Would loop through zones to apply standard configurations
+
+**Known Issues**:
+- Missing implementation file: `apply-standard-records.yml`
+- Standard records variable `standard_records` not defined
+- Sync action will fail until implementation is completed
 
 **Files Involved**:
-- Sync logic: Main playbook sync block
-- Standards definition: `helm-charts/charts/awx/config/cloudflare-standards.yml`
+- Main sync logic: `cloudflare_awx_playbook.yml` (sync block)
+- **Missing**: `apply-standard-records.yml` (referenced but does not exist)
+- **Available but unused**: `helm-charts/charts/awx/config/cloudflare-standards.yml` (standards definition exists but not referenced in playbook)
 
 ## Settings Management
 
