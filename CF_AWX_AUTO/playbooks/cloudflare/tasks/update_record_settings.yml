@@ -1,0 +1,88 @@
+---
+# Update DNS Record Level Settings (TTL, Proxied status)
+# Required variables: zone_id, resolved_domain, resolved_record_name
+
+- name: Build FQ record name
+  set_fact:
+    fq_record_name: >-
+      {%- if resolved_record_name is defined and resolved_record_name | length > 0 -%}
+      {%- if resolved_record_name | regex_search('\.' ~ resolved_domain ~ '$') -%}
+      {{ resolved_record_name | trim }}
+      {%- elif resolved_record_name == '@' -%}
+      {{ resolved_domain }}
+      {%- else -%}
+      {{ (resolved_record_name | trim) ~ '.' ~ resolved_domain }}
+      {%- endif -%}
+      {%- else -%}
+      {{ resolved_domain }}
+      {%- endif -%}
+
+- name: Find DNS record by name
+  uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records?{% if record_type is defined %}type={{ record_type }}&{% endif %}name={{ fq_record_name | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+    return_content: true
+    validate_certs: "{{ cf_validate_certs | default(true) }}"
+  register: record_lookup_for_update
+  when: zone_id is defined
+
+- name: Set record_id from lookup
+  set_fact:
+    record_id: "{{ record_lookup_for_update.json.result[0].id }}"
+  when:
+    - record_lookup_for_update is defined
+    - record_lookup_for_update.json is defined
+    - record_lookup_for_update.json.result|length > 0
+
+- name: Get current record details
+  uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+    return_content: true
+    validate_certs: "{{ cf_validate_certs | default(true) }}"
+  register: current_record_details
+  when: record_id is defined
+
+- name: Build updated record payload as JSON
+  set_fact:
+    updated_record_payload_json: >-
+      {{ ({
+          'type': current_record_details.json.result.type,
+          'name': current_record_details.json.result.name,
+          'content': (record_value | default(current_record_details.json.result.content)),
+          'ttl': ((record_ttl | default(current_record_details.json.result.ttl)) | int),
+          'proxied': ((record_proxied | default(current_record_details.json.result.proxied)) | bool)
+        }) | to_json }}
+  when: current_record_details is defined and current_record_details.json.result is defined
+
+- name: Update DNS record settings
+  uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ zone_id }}/dns_records/{{ record_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+      Content-Type: "application/json"
+    body: "{{ updated_record_payload_json }}"
+    return_content: true
+    validate_certs: "{{ cf_validate_certs | default(true) }}"
+  register: record_update_result
+  when:
+    - record_id is defined
+    - updated_record_payload_json is defined
+
+- name: Track record settings update
+  set_fact:
+    domain_changes: "{{ domain_changes + [{'type': 'RECORD_SETTINGS_UPDATED', 'record': fq_record_name, 'ttl': record_ttl | default('unchanged'), 'proxied': record_proxied | default('unchanged'), 'status': 'success' if (record_update_result is defined and record_update_result.json.success) else 'failed'}] }}"
+  when: record_update_result is defined
+
+- name: Display result
+  debug:
+    msg:
+      - "DNS record settings updated: {{ fq_record_name }}"
+      - "  TTL: {{ record_ttl | default('unchanged') }}"
+      - "  Proxied: {{ record_proxied | default('unchanged') }}"
+      - "  Status: {{ 'Success' if (record_update_result is defined and record_update_result.json.success) else 'Failed' }}"

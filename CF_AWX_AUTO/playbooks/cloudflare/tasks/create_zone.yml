@@ -1,0 +1,32 @@
+---
+# Create Cloudflare Zone Task
+# Creates a new Cloudflare zone (domain) with jump start enabled
+
+- name: Create zone via API
+  uri:
+    url: "https://api.cloudflare.com/client/v4/zones"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ resolved_domain }}"
+      jump_start: true
+    return_content: true
+    validate_certs: "{{ cf_validate_certs | default(true) }}"
+  register: create_zone_result
+
+- name: Track zone creation
+  set_fact:
+    domain_changes: "{{ domain_changes + [{'type': 'ZONE_CREATED', 'domain': resolved_domain, 'zone_id': create_zone_result.json.result.id | default('N/A'), 'status': 'SUCCESS' if create_zone_result.json.success else 'FAILED'}] }}"
+  when: create_zone_result.json is defined
+
+- name: Display result
+  debug:
+    msg:
+      - "New Cloudflare Zone Created"
+      - "  Domain: {{ resolved_domain }}"
+      - "  Zone ID: {{ create_zone_result.json.result.id | default('N/A') }}"
+      - "  Status: {{ create_zone_result.json.result.status | default('N/A') }}"
+  when: create_zone_result.json.success | default(false)

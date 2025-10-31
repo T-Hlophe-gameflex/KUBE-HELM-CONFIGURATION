@@ -1,0 +1,302 @@
+# Example AWX Instance Configuration
+# Copy this file and customize for your environment
+# Then deploy with: kubectl apply -f awx-instance.yaml
+
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: ansible-awx
+  namespace: awx
+spec:
+  # =============================================================================
+  # Image Configuration
+  # =============================================================================
+  
+  # Use the patched AWX image with Cloudflare automation
+  # Pre-built image available at: docker.io/blackthami/awx-cloudflare-auto
+  # Or build your own with: make build-image
+  image: docker.io/blackthami/awx-cloudflare-auto
+  image_version: 24.6.1-cf-auto
+  image_pull_policy: IfNotPresent
+  
+  # For custom/private registry:
+  # image_pull_secrets:
+  #   - name: my-registry-secret
+  
+  # =============================================================================
+  # Service Configuration
+  # =============================================================================
+  
+  # Service type options: ClusterIP, NodePort, LoadBalancer
+  service_type: ClusterIP
+  
+  # For NodePort (access via node IP):
+  # service_type: NodePort
+  # service_node_port_port: 30080
+  
+  # For LoadBalancer (cloud environments):
+  # service_type: LoadBalancer
+  # service_annotations:
+  #   service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+  
+  # =============================================================================
+  # Ingress Configuration (Recommended for Production)
+  # =============================================================================
+  
+  # Disable ingress (use port-forward or NodePort)
+  ingress_type: none
+  
+  # Enable ingress with your domain:
+  # ingress_type: ingress
+  # ingress_hosts:
+  #   - hostname: awx.yourdomain.com
+  #     tls_secret: awx-tls-secret
+  # 
+  # ingress_class_name: nginx  # or traefik, etc.
+  # 
+  # ingress_annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  #   nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  
+  # =============================================================================
+  # Resource Requirements
+  # =============================================================================
+  
+  # AWX Web Pod (UI + API)
+  web_resource_requirements:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # AWX Task Pod (Job Execution)
+  task_resource_requirements:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # EE (Execution Environment) Control Plane
+  ee_resource_requirements:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # PostgreSQL Database
+  postgres_resource_requirements:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  
+  # Redis Cache
+  redis_resource_requirements:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # =============================================================================
+  # Scaling Configuration (Enterprise/Production)
+  # =============================================================================
+  
+  # Number of web pod replicas (horizontal scaling)
+  # replicas: 3
+  
+  # Number of task pod replicas (for job parallelization)
+  # task_replicas: 3
+  
+  # =============================================================================
+  # Storage Configuration
+  # =============================================================================
+  
+  # PostgreSQL storage class and size
+  postgres_storage_class: standard
+  postgres_storage_requirements:
+    requests:
+      storage: 8Gi
+  
+  # For faster storage (recommended for production):
+  # postgres_storage_class: fast-ssd  # or your fast storage class
+  # postgres_storage_requirements:
+  #   requests:
+  #     storage: 20Gi
+  
+  # Projects storage (for storing playbooks)
+  # projects_persistence: true
+  # projects_storage_class: standard
+  # projects_storage_size: 8Gi
+  # projects_storage_access_mode: ReadWriteOnce
+  
+  # =============================================================================
+  # External Database (Optional - for HA/Production)
+  # =============================================================================
+  
+  # Use external PostgreSQL instead of in-cluster
+  # postgres_configuration_secret: external-postgres-config
+  # 
+  # Create secret with:
+  # kubectl create secret generic external-postgres-config \
+  #   --from-literal=host=postgres.example.com \
+  #   --from-literal=port=5432 \
+  #   --from-literal=database=awx \
+  #   --from-literal=username=awx \
+  #   --from-literal=password=secretpassword \
+  #   --from-literal=sslmode=prefer \
+  #   --from-literal=type=unmanaged \
+  #   -n awx
+  
+  # =============================================================================
+  # Execution Environment Configuration
+  # =============================================================================
+  
+  # Execution environments (container images) available for job execution
+  ee_images:
+    - name: AWX EE (Default)
+      image: quay.io/ansible/awx-ee:24.6.1
+  
+  # Add custom execution environments:
+  # ee_images:
+  #   - name: AWX EE
+  #     image: quay.io/ansible/awx-ee:24.6.1
+  #   - name: Custom Cloudflare EE
+  #     image: myregistry/cloudflare-ee:latest
+  #   - name: Network Automation EE
+  #     image: myregistry/network-ee:latest
+  
+  # Control plane EE (used for project updates, inventory syncs)
+  # ee_image: quay.io/ansible/awx-ee:24.6.1
+  
+  # =============================================================================
+  # Security Configuration
+  # =============================================================================
+  
+  # Admin user (default: admin)
+  admin_user: admin
+  
+  # Admin password will be auto-generated and stored in secret:
+  # ansible-awx-admin-password
+  # Retrieve with: kubectl get secret ansible-awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 --decode
+  
+  # Or specify custom admin password secret:
+  # admin_password_secret: custom-admin-password
+  
+  # Broadcast websocket secret (auto-generated if not specified)
+  # broadcast_websocket_secret: custom-broadcast-secret
+  
+  # Secret key secret (auto-generated if not specified)
+  # secret_key_secret: custom-secret-key
+  
+  # =============================================================================
+  # LDAP Configuration (Optional - Enterprise Authentication)
+  # =============================================================================
+  
+  # ldap_cacert_secret: ldap-ca-cert
+  # ldap_password_secret: ldap-password
+  
+  # =============================================================================
+  # Additional Environment Variables
+  # =============================================================================
+  
+  # Extra environment variables for AWX pods
+  # extra_env: |
+  #   - name: ANSIBLE_FORCE_COLOR
+  #     value: "True"
+  #   - name: ANSIBLE_HOST_KEY_CHECKING
+  #     value: "False"
+  
+  # =============================================================================
+  # Garbage Collection & Maintenance
+  # =============================================================================
+  
+  # Remove old job histories automatically
+  # garbage_collect_secrets: true
+  
+  # =============================================================================
+  # Development/Debug Settings
+  # =============================================================================
+  
+  # Enable development mode (not for production!)
+  # development_mode: false
+  
+  # =============================================================================
+  # Backup Configuration
+  # =============================================================================
+  
+  # For AWX operator backup/restore:
+  # Create AWXBackup CR separately
+  # See: https://github.com/ansible/awx-operator/blob/devel/docs/backup-restore.md
+  
+  # =============================================================================
+  # Metrics & Monitoring
+  # =============================================================================
+  
+  # Enable Prometheus metrics
+  # metrics_utility_enabled: true
+  # metrics_utility_image_pull_policy: IfNotPresent
+  
+  # ServiceMonitor for Prometheus Operator
+  # metrics_utility_create_service_monitor: true
+
+---
+# =============================================================================
+# Additional Resources Needed
+# =============================================================================
+
+# 1. Namespace (if not exists)
+# kubectl create namespace awx
+
+# 2. Cloudflare API Token Secret
+# kubectl create secret generic cloudflare-credentials \
+#   --from-literal=token=your_cloudflare_api_token \
+#   -n awx
+
+# 3. (Optional) TLS Certificate for Ingress
+# kubectl create secret tls awx-tls-secret \
+#   --cert=path/to/tls.crt \
+#   --key=path/to/tls.key \
+#   -n awx
+
+# 4. (Optional) Private Registry Credentials
+# kubectl create secret docker-registry my-registry-secret \
+#   --docker-server=myregistry.com \
+#   --docker-username=myuser \
+#   --docker-password=mypassword \
+#   -n awx
+
+# =============================================================================
+# Deployment Commands
+# =============================================================================
+
+# Deploy AWX:
+# kubectl apply -f awx-instance.yaml
+
+# Check status:
+# kubectl get awx -n awx
+# kubectl get pods -n awx
+
+# Watch deployment:
+# kubectl get awx -n awx -w
+
+# Get admin password:
+# kubectl get secret ansible-awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 --decode
+
+# Port-forward to access UI:
+# kubectl port-forward -n awx svc/ansible-awx-service 8052:80
+
+# Access UI:
+# http://localhost:8052
+# Username: admin
+# Password: (from get secret command above)

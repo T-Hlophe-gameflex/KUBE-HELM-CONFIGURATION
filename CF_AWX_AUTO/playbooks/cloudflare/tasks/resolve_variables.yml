@@ -1,0 +1,66 @@
+---
+# Variable Resolution Task
+# Resolve domain and record names from dropdown selections or manual entries
+
+- name: Resolve domain name from dropdown or manual entry
+  set_fact:
+    resolved_domain: >-
+      {%- if cf_action == 'clone_record' -%}
+        {%- if domain is defined and (domain | trim) != '' -%}
+          {{ domain | trim }}
+        {%- elif existing_domain is defined and (existing_domain | trim) != '' -%}
+          {{ existing_domain | trim }}
+        {%- elif manual_domain is defined and (manual_domain | trim) != '' -%}
+          {{ manual_domain | trim }}
+        {%- else -%}
+          
+        {%- endif -%}
+      {%- else -%}
+        {%- if existing_domain is defined and (existing_domain | trim) != '' -%}
+          {{ existing_domain | trim }}
+        {%- elif manual_domain is defined and (manual_domain | trim) != '' -%}
+          {{ manual_domain | trim }}
+        {%- elif domain is defined and (domain | trim) != '' -%}
+          {{ domain | trim }}
+        {%- else -%}
+          
+        {%- endif -%}
+      {%- endif -%}
+
+- name: Resolve record name from dropdown or manual entry
+  set_fact:
+    resolved_record_name: >-
+      {%- if cf_action == 'clone_record' -%}
+        {%- if record_name is defined and (record_name | trim) != '' -%}
+          {{ record_name | trim }}
+        {%- else -%}
+          
+        {%- endif -%}
+      {%- else -%}
+        {%- if record_name is defined and (record_name | trim) != '' -%}
+          {{ record_name | trim }}
+        {%- elif existing_record is defined and (existing_record | trim) != '' -%}
+          {{ existing_record | trim }}
+        {%- else -%}
+          
+        {%- endif -%}
+      {%- endif -%}
+
+- name: Debug variable resolution for clone
+  debug:
+    msg:
+      - "  CLONE VARIABLE DEBUG:"
+      - "  cf_action: {{ cf_action | default('UNDEFINED') }}"
+      - "  record_name: {{ record_name | default('UNDEFINED') }}"
+      - "  resolved_record_name: {{ resolved_record_name | default('UNDEFINED') }}"
+  when: cf_action == 'clone_record'
+
+- name: Display action summary
+  debug:
+    msg:
+      - "════════════════════════════════════════════════════════════════"
+      - "  ACTION: {{ cf_action | upper | default('UNDEFINED') }}"
+      - "  DOMAIN: {{ resolved_domain | default('undefined') }}"
+      - "  RECORD: {{ resolved_record_name | default('none') }}"
+      - "  TYPE: {{ record_type | default('n/a') }}"
+      - "════════════════════════════════════════════════════════════════"

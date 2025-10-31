@@ -1,0 +1,188 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cf_validate_certs: false
+    domain_changes: []
+    global_changes: []
+    platform_changes: []
+    awx_password: "{{ lookup('env', 'AWX_PASSWORD') | default(lookup('pipe', 'kubectl get secret ansible-awx-admin-password -n awx -o jsonpath=\"{.data.password}\" | base64 --decode')) }}"
+    
+  tasks:
+ 
+    - name: Resolve input variables
+      include_tasks: "tasks/resolve_variables.yml"
+
+    - name: Create and apply AWX job labels
+      include_tasks: "tasks/manage_job_labels.yml"
+
+    - name: Create Cloudflare zone
+      include_tasks: "tasks/create_zone.yml"
+      when: cf_action == 'create_domain'
+
+    - name: Apply standard zone settings
+      when: 
+        - cf_action in ['create_domain', 'create_record']
+        - resolved_domain is defined
+        - resolved_domain != 'undefined'
+        - resolved_domain | length > 0
+      block:
+        - name: Get zone ID
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          check_mode: false
+          register: zone_lookup
+          
+        - name: Set zone_id
+          set_fact:
+            zone_id: >-
+              {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
+
+        - name: Apply zone settings
+          include_tasks: "tasks/apply_zone_settings.yml"
+          when: zone_id is defined and zone_id | length > 0
+
+    - name: Update settings at different levels
+      when:
+        - cf_action == 'update_settings'
+        - settings_level is defined
+      block:
+        - name: Get zone ID
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          register: zone_lookup
+          check_mode: false
+
+        - name: Set zone_id
+          set_fact:
+            zone_id: "{{ zone_lookup.json.result[0].id }}"
+          when: zone_lookup.json.result|length > 0
+
+        - name: Update zone-level settings
+          include_tasks: "tasks/update_zone_settings.yml"
+          when: settings_level == 'zone'
+
+        - name: Update record-level settings
+          include_tasks: "tasks/update_record_settings.yml"
+          when: settings_level == 'record'
+
+        - name: Handle account-level settings
+          when: settings_level == 'account'
+          block:
+            - name: Display account settings info
+              debug:
+                msg:
+                  - "Account-level settings management"
+                  - "  Note: Requires specific API endpoints per setting type"
+                  - "  Examples: Billing, subscriptions, account members"
+
+            - name: Track account operation
+              set_fact:
+                platform_changes: "{{ platform_changes + [{'type': 'ACCOUNT_SETTINGS_INFO', 'message': 'Account level settings require specific implementation per setting type'}] }}"
+  
+    - name: Manage DNS records
+      when: 
+        - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
+        - resolved_domain is defined
+        - resolved_domain != 'undefined'
+        - resolved_domain | length > 0
+      block:
+        - name: Get zone ID
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones?name={{ resolved_domain }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          register: zone_lookup
+          
+        - name: Set zone_id
+          set_fact:
+            zone_id: >-
+              {{ (zone_lookup.json.result[0].id) if (zone_lookup is defined and zone_lookup.json is defined and zone_lookup.json.result is defined and zone_lookup.json.result|length > 0) else '' }}
+
+        - name: Apply modern Cloudflare rules
+          when:
+            - cf_action in ['create_domain', 'create_record', 'update_record', 'clone_record']
+            - zone_id is defined and zone_id | length > 0
+          block:
+            - name: Set default rule action to apply all modern Cloudflare rules
+              set_fact:
+                survey_rule_action: "all"
+
+            - name: Expand rule actions list
+              set_fact:
+                rule_actions_to_apply: "{{ ['force_https', 'redirect_to_www', 'cache_level', 'edge_cache_ttl', 'argo_smart_routing', 'cache_everything', 'browser_cache_ttl'] }}"
+
+            - name: Apply each rule
+              include_tasks: "tasks/apply_single_modern_rule.yml"
+              loop: "{{ rule_actions_to_apply }}"
+              loop_control:
+                loop_var: current_rule_action
+              vars:
+                domain: "{{ resolved_domain }}"
+              when: rule_actions_to_apply | length > 0
+
+        - name: Prepare record variables for DNS operations
+          include_tasks: "tasks/prepare_record_variables.yml"
+
+        - name: Execute DNS record operation
+          include_tasks: "tasks/manage_dns_record.yml"
+
+    - name: Sync standard records across all zones
+      when: cf_action == 'sync'
+      block:
+        - name: Get all zones
+          uri:
+            url: "https://api.cloudflare.com/client/v4/zones"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ lookup('env','CLOUDFLARE_API_TOKEN') }}"
+            return_content: true
+            validate_certs: "{{ cf_validate_certs | default(true) }}"
+          register: all_zones
+          
+        - name: Apply standard records to each zone
+          include_tasks: apply-standard-records.yml
+          loop: "{{ all_zones.json.result }}"
+          loop_control:
+            loop_var: zone
+
+        - name: Display sync result
+          debug:
+            msg: "[SUCCESS] Platform sync completed - {{ (standard_records | default([]) | length) }} record types applied"
+
+    - name: Display zone configuration summary
+      when: resolved_domain is defined and resolved_domain|length > 0
+      debug:
+        msg: "Configuration: {{ resolved_domain }} (Zone: {{ zone_id | default('N/A') }}) | Rules applied: {{ rule_actions_to_apply | default([]) | length }}"
+
+    - name: Display execution summary
+      debug:
+        msg: |
+          
+          CLOUDFLARE AUTOMATION SUMMARY
+          ════════════════════════════════════════════════════════════
+          Action: {{ cf_action | upper | default('NONE') }} | Domain: {{ resolved_domain | default('N/A') }}{% if settings_level is defined %} | Settings Level: {{ settings_level | upper }}{% endif %}
+          
+          Domain Changes: {{ domain_changes | length }} operation(s){% if domain_changes | length > 0 %}
+          {% for change in domain_changes %}  ✓ {{ change.get('action', 'undefined') | replace('_', ' ') | title }} - {{ change.get('record', 'N/A') }} ({{ change.get('type', 'N/A') }}){% endfor %}{% endif %}
+          
+          Global Changes: {{ global_changes | length }} setting(s){% if global_changes | length > 0 %}
+          {% for change in global_changes %}  ✓ {{ change.get('setting', 'undefined') }} = {{ change.get('value', 'N/A') }}{% endfor %}{% endif %}
+          
+          Platform Changes: {{ platform_changes | length }} operation(s){% if platform_changes | length > 0 %}
+          {% for change in platform_changes %}  ✓ {{ change.get('action', 'undefined') }}{% endfor %}{% endif %}
+          ════════════════════════════════════════════════════════════
