@@ -37,10 +37,10 @@
           
         {%- endif -%}
       {%- else -%}
-        {%- if existing_record is defined and (existing_record | trim) != '' -%}
-          {{ existing_record | trim }}
-        {%- elif record_name is defined and (record_name | trim) != '' -%}
+        {%- if record_name is defined and (record_name | trim) != '' -%}
           {{ record_name | trim }}
+        {%- elif existing_record is defined and (existing_record | trim) != '' -%}
+          {{ existing_record | trim }}
         {%- else -%}
           
         {%- endif -%}

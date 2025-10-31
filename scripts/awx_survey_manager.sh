@@ -445,6 +445,7 @@ update_dropdowns() {
     MERGED_DOMAINS="$CLOUDFLARE_DOMAINS"
     
     # Update survey spec with new domain and record choices
+    # Try empty string as default for records to avoid auto-selection
     UPDATED_SURVEY=$(echo "$CURRENT_SURVEY" | jq --argjson domains "$MERGED_DOMAINS" --argjson records "$CLOUDFLARE_RECORDS" '
         .spec |= map(
             if .variable == "existing_domain" then
