@@ -1,14 +1,33 @@
 ---
 # Variable Resolution Task
 # Resolve domain and record names from dropdown selections or manual entries
+# Supports both survey fields (selected_record_name, domain) and traditional vars (existing_record, record_name, etc.)
+
+- name: Map survey variables to internal variables
+  set_fact:
+    # Map domain survey field
+    existing_domain: "{{ domain if (domain is defined and (domain | trim) != '' and (domain | trim) not in ['[NONE]', '[REFRESH_NEEDED]']) else (existing_domain | default('')) }}"
+    # Map record name survey field - check if it's from dropdown or manual
+    existing_record: >-
+      {%- if selected_record_name is defined and (selected_record_name | trim) != '' and (selected_record_name | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
+        {%- if (selected_record_name | trim).startswith('▸ ') -%}
+          {{ (selected_record_name | trim)[2:] }}
+        {%- else -%}
+          {{ selected_record_name | trim }}
+        {%- endif -%}
+      {%- else -%}
+        {{ existing_record | default('') }}
+      {%- endif -%}
+    # Also set record_name as fallback for manual entry
+    record_name: "{{ record_name | default('') if (record_name is defined and (record_name | trim) != '') else (selected_record_name | default('') if (selected_record_name is defined and (selected_record_name | trim) != '' and (selected_record_name | trim) not in ['[NONE]', '[REFRESH_NEEDED]']) else '') }}"
 
 - name: Resolve domain name from dropdown or manual entry
   set_fact:
     resolved_domain: >-
       {%- if cf_action == 'clone_record' -%}
-        {%- if domain is defined and (domain | trim) != '' -%}
+        {%- if domain is defined and (domain | trim) != '' and (domain | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ domain | trim }}
-        {%- elif existing_domain is defined and (existing_domain | trim) != '' -%}
+        {%- elif existing_domain is defined and (existing_domain | trim) != '' and (existing_domain | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ existing_domain | trim }}
         {%- elif manual_domain is defined and (manual_domain | trim) != '' -%}
           {{ manual_domain | trim }}
@@ -16,11 +35,11 @@
           
         {%- endif -%}
       {%- else -%}
-        {%- if existing_domain is defined and (existing_domain | trim) != '' -%}
+        {%- if existing_domain is defined and (existing_domain | trim) != '' and (existing_domain | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ existing_domain | trim }}
         {%- elif manual_domain is defined and (manual_domain | trim) != '' -%}
           {{ manual_domain | trim }}
-        {%- elif domain is defined and (domain | trim) != '' -%}
+        {%- elif domain is defined and (domain | trim) != '' and (domain | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ domain | trim }}
         {%- else -%}
           
@@ -31,15 +50,19 @@
   set_fact:
     resolved_record_name: >-
       {%- if cf_action == 'clone_record' -%}
-        {%- if record_name is defined and (record_name | trim) != '' -%}
+        {%- if new_record_name is defined and (new_record_name | trim) != '' and (new_record_name | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
+          {{ new_record_name | trim }}
+        {%- elif record_name is defined and (record_name | trim) != '' and (record_name | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ record_name | trim }}
+        {%- elif existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
+          {{ existing_record | trim }}
         {%- else -%}
           
         {%- endif -%}
       {%- else -%}
-        {%- if record_name is defined and (record_name | trim) != '' -%}
+        {%- if record_name is defined and (record_name | trim) != '' and (record_name | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ record_name | trim }}
-        {%- elif existing_record is defined and (existing_record | trim) != '' -%}
+        {%- elif existing_record is defined and (existing_record | trim) != '' and (existing_record | trim) not in ['[NONE]', '[REFRESH_NEEDED]'] -%}
           {{ existing_record | trim }}
         {%- else -%}
           
@@ -49,11 +72,27 @@
 - name: Debug variable resolution for clone
   debug:
     msg:
-      - "  CLONE VARIABLE DEBUG:"
-      - "  cf_action: {{ cf_action | default('UNDEFINED') }}"
-      - "  record_name: {{ record_name | default('UNDEFINED') }}"
-      - "  resolved_record_name: {{ resolved_record_name | default('UNDEFINED') }}"
+      - "  CLONE VARIABLE RESOLUTION:"
+      - "  Survey field → selected_record_name: {{ selected_record_name | default('UNDEFINED') }}"
+      - "  Mapped to → existing_record (source): {{ existing_record | default('UNDEFINED') }}"
+      - "  new_record_name (target): {{ new_record_name | default('UNDEFINED') }}"
+      - "  record_name (target fallback): {{ record_name | default('UNDEFINED') }}"
+      - "  → FINAL resolved_record_name (target): {{ resolved_record_name | default('UNDEFINED') }}"
+      - "  → FINAL resolved_domain (target domain): {{ resolved_domain | default('UNDEFINED') }}"
   when: cf_action == 'clone_record'
+
+- name: Debug variable resolution for other actions
+  debug:
+    msg:
+      - "  VARIABLE RESOLUTION:"
+      - "  Survey field → domain: {{ domain | default('UNDEFINED') }}"
+      - "  Survey field → selected_record_name: {{ selected_record_name | default('UNDEFINED') }}"
+      - "  Mapped to → existing_domain: {{ existing_domain | default('UNDEFINED') }}"
+      - "  Mapped to → existing_record: {{ existing_record | default('UNDEFINED') }}"
+      - "  Manual → record_name: {{ record_name | default('UNDEFINED') }}"
+      - "  → FINAL resolved_domain: {{ resolved_domain | default('UNDEFINED') }}"
+      - "  → FINAL resolved_record_name: {{ resolved_record_name | default('UNDEFINED') }}"
+  when: cf_action != 'clone_record'
 
 - name: Display action summary
   debug:
