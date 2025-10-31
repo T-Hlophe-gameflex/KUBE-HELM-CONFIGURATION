@@ -1,0 +1,53 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Test scenario 1 - Both dropdown and manual empty (should fail)
+      block:
+        - name: Resolve variables
+          include_tasks: automation/playbooks/cloudflare/tasks/resolve_variables.yml
+          vars:
+            cf_action: create_record
+            existing_domain: efustryton.co.za
+            existing_record: ""  # Empty dropdown 
+            record_name: ""      # Empty manual entry
+            
+        - name: Test validation
+          include_tasks: automation/playbooks/cloudflare/tasks/manage_dns_record.yml
+          vars:
+            zone_id: "dummy"
+            
+      rescue:
+        - name: Show expected failure
+          debug:
+            msg:
+              - "✅ EXPECTED FAILURE: Both dropdown and manual entry empty"
+              - "Validation correctly failed as expected"
+              
+    - name: Test scenario 2 - User enters @ manually (should pass)
+      block:
+        - name: Resolve variables  
+          include_tasks: automation/playbooks/cloudflare/tasks/resolve_variables.yml
+          vars:
+            cf_action: create_record
+            existing_domain: efustryton.co.za
+            existing_record: ""  # Empty dropdown
+            record_name: "@"     # User manually entered @
+            
+        - name: Prepare variables
+          include_tasks: automation/playbooks/cloudflare/tasks/prepare_record_variables.yml
+          
+        - name: Show success
+          debug:
+            msg:
+              - "✅ SUCCESS: User entered @ manually"
+              - "Resolved record: {{ resolved_record_name }}"
+              - "Effective record: {{ effective_record_name }}"
+              - "FQ record name: {{ fq_record_name }}"
+              
+      rescue:
+        - name: Show unexpected failure
+          debug:
+            msg:
+              - "❌ UNEXPECTED FAILURE: @ should be valid"

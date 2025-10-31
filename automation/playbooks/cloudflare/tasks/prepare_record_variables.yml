@@ -26,8 +26,28 @@
       {{ (effective_record_name | trim) ~ '.' ~ resolved_domain }}
       {%- endif -%}
       {%- else -%}
-      {{ resolved_domain }}
+      EMPTY_RECORD_NAME
       {%- endif -%}
+
+- name: Validate record name is provided
+  fail:
+    msg: |
+      ❌ Record name is required for DNS operations.
+      
+      Please provide a record name either by:
+      1. Selecting from the 'Existing Record' dropdown, OR
+      2. Entering a name in the 'Record Name' field
+      
+      Examples for domain '{{ resolved_domain }}':
+      - Use '@' for root domain record ({{ resolved_domain }})
+      - Use 'www' for www.{{ resolved_domain }}
+      - Use 'mail' for mail.{{ resolved_domain }}
+      
+      Current values:
+      - Dropdown selection (existing_record): {{ existing_record | default('empty') }}
+      - Manual entry (record_name): {{ record_name | default('empty') }}
+      - Resolved record name: {{ resolved_record_name | default('empty') }}
+  when: fq_record_name == "EMPTY_RECORD_NAME"
 
 - name: Set TTL and proxied defaults
   set_fact:
