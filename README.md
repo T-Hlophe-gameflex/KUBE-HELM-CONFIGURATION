@@ -482,5 +482,58 @@ kubectl logs -n monitoring deployment/elasticsearch
 kubectl logs -n monitoring deployment/kibana
 
 # Test connectivity
+# Test connectivity
 kubectl exec -it -n monitoring deployment/elasticsearch -- curl http://localhost:9200
+```
+
+## 🎫 AWX Survey Enhancements
+
+### New Features Added
+
+#### Ticket Number Integration
+- **Ticket Field**: All AWX jobs now include a required "Ticket Number" field
+- **Custom Labeling**: Jobs are automatically labeled with format: `{ticket_number} - {action}`
+- **Example**: Job labeled as "SD-116778 - clone_record" for easy tracking
+
+#### Clone Record Functionality
+- **New Action**: `clone_record` added to DNS management operations
+- **Smart Cloning**: Automatically copies all properties from source record
+- **Flexible Content**: Optionally override record value during clone
+- **Audit Trail**: Includes ticket number in record comments
+
+### Usage Examples
+
+```bash
+# Apply enhanced survey to AWX
+./scripts/awx_survey_manager.sh apply-survey
+
+# Verify survey changes
+./scripts/awx_survey_manager.sh verify-changes
+
+# Show current configuration
+./scripts/awx_survey_manager.sh show-current
+```
+
+### Supported Operations
+
+| Operation | Description | Required Fields |
+|-----------|-------------|-----------------|
+| `create_record` | Create new DNS record | ticket_number, record_name, record_value |
+| `update_record` | Update existing record | ticket_number, record_name, record_value |
+| `delete_record` | Delete DNS record | ticket_number, record_name |
+| `clone_record` | Clone existing record | ticket_number, source_record_name, record_name |
+| `create_domain` | Add new domain | ticket_number, domain_name |
+
+### Job Naming Convention
+
+All AWX jobs now follow the pattern: `{TICKET_NUMBER} - {ACTION}`
+
+Examples:
+- `SD-116778 - clone_record`
+- `INC-002341 - create_record`  
+- `REQ-445566 - delete_record`
+
+This enhancement improves traceability and makes it easier to track DNS changes back to service desk tickets.
+
+````
 ```

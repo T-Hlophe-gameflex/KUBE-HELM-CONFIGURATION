@@ -513,6 +513,21 @@ class BaseTask(object):
 
         # self.instance because of the update_model pattern and when it's used in callback handlers
         self.instance = self.update_model(pk, status='running', start_args='')  # blank field to remove encrypted passwords
+        
+        # Custom labeling: Extract ticket number and action for custom job naming
+        try:
+            extra_vars = self.instance.extra_vars_dict
+            ticket_number = extra_vars.get('ticket_number', '')
+            cf_action = extra_vars.get('cf_action', '')
+            
+            if ticket_number and cf_action:
+                custom_name = f"{ticket_number} - {cf_action}"
+                # Update the job name with custom label
+                self.instance = self.update_model(pk, name=custom_name)
+        except Exception as e:
+            # If custom labeling fails, continue with normal execution
+            pass
+        
         self.instance.websocket_emit_status("running")
         status, rc = 'error', None
         self.runner_callback.event_ct = 0

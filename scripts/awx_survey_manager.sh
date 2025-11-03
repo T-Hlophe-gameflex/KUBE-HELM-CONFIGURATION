@@ -201,6 +201,14 @@ apply_survey() {
           "variable": "security_level",
           "choices": ["off", "flexible", "full", "strict"],
           "default": "full"
+        },
+        {
+          "question_name": "Ticket Number",
+          "question_description": "Enter your service desk ticket number (e.g., SD-116778)",
+          "required": true,
+          "type": "text",
+          "variable": "ticket_number",
+          "default": ""
         }
       ]
     }'

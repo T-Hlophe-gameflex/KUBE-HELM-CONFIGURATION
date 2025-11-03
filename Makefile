@@ -5,7 +5,7 @@
 # Author: Infrastructure Automation Team
 # =============================================================================
 
-.PHONY: help setup-python setup-cluster setup clean deploy-complete deploy-elk deploy-apps remove-complete remove-elk remove-apps cloudflare-dns validate status kibana elasticsearch logs generate-logs install-deps check-env backup restore
+.PHONY: help setup-python setup-cluster setup clean deploy-complete deploy-elk deploy-apps remove-complete remove-elk remove-apps cloudflare-dns validate status kibana elasticsearch logs generate-logs install-deps check-env backup restore apply-survey verify-survey show-survey update-dropdowns update-dropdown show-job-tickets
 
 # =============================================================================
 # CONFIGURATION VARIABLES
@@ -69,6 +69,14 @@ help:
 	@echo -e "$(CYAN)☁️  CLOUDFLARE DNS:$(NC)"
 	@echo "  cloudflare-dns  🌐 Interactive DNS management with domain dropdown"
 	@echo "  test-cloudflare 🧪 Test Cloudflare API connectivity"
+	@echo ""
+	@echo -e "$(CYAN)🎭 AWX SURVEY MANAGEMENT:$(NC)"
+	@echo "  apply-survey    📋 Apply enhanced survey with ticket number field"
+	@echo "  verify-survey   🔍 Verify survey configuration"
+	@echo "  show-survey     📋 Display current survey configuration"
+	@echo "  update-dropdowns 🔄 Update survey dropdowns with live Cloudflare data"
+	@echo "  update-dropdown 🔄 Alias for update-dropdowns (singular)"
+	@echo "  show-job-tickets 🎫 Show recent jobs with ticket tracking"
 	@echo ""
 	@echo -e "$(CYAN)🔍 MONITORING & ACCESS:$(NC)"
 	@echo "  status          📊 Show comprehensive deployment status"
@@ -408,6 +416,48 @@ info:
 	@echo "  Storage Class: $(STORAGE_CLASS)"
 	@echo "  Elasticsearch Memory: $(ELASTICSEARCH_MEMORY)"
 	@echo ""
+
+# =============================================================================
+# AWX SURVEY MANAGEMENT
+# =============================================================================
+apply-survey:
+	@echo -e "$(BLUE)📋 Applying enhanced AWX survey with ticket number field...$(NC)"
+	@./scripts/awx_survey_manager.sh apply-survey
+
+verify-survey:
+	@echo -e "$(BLUE)🔍 Verifying AWX survey configuration...$(NC)"
+	@./scripts/awx_survey_manager.sh verify-changes
+
+show-survey:
+	@echo -e "$(BLUE)📋 Displaying current AWX survey configuration...$(NC)"
+	@./scripts/awx_survey_manager.sh show-current
+
+update-dropdowns:
+	@echo -e "$(BLUE)🔄 Updating survey dropdowns with live Cloudflare data...$(NC)"
+	@if [ -z "$$CLOUDFLARE_API_TOKEN" ]; then \
+		echo -e "$(RED)❌ CLOUDFLARE_API_TOKEN environment variable not set$(NC)"; \
+		echo -e "$(YELLOW)Please export your Cloudflare API token:$(NC)"; \
+		echo "export CLOUDFLARE_API_TOKEN=your_token_here"; \
+		echo ""; \
+		echo "Then run: make update-dropdowns"; \
+		exit 1; \
+	fi
+	@./scripts/awx_survey_manager.sh update-dropdowns
+
+update-dropdown: update-dropdowns
+	@# Alias for update-dropdowns
+
+show-job-tickets:
+	@echo -e "$(BLUE)📋 Recent AWX Jobs with Ticket Tracking$(NC)"
+	@echo -e "$(BLUE)======================================$(NC)"
+	@curl -s -u "admin:$$(kubectl get secret ansible-awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 -d)" \
+		"http://localhost:8080/api/v2/jobs/?page_size=10" | \
+		jq -r '.results[] | select(.extra_vars | contains("ticket_number")) | 
+		{id, status, ticket: (.extra_vars | fromjson | .ticket_number), 
+		 action: (.extra_vars | fromjson | .cf_action), 
+		 record: (.extra_vars | fromjson | .record_name), 
+		 domain: (.extra_vars | fromjson | .manual_domain)} | 
+		"Job \(.id): [\(.status)] \(.ticket) - \(.action) (\(.record).\(.domain))"' | head -10
 
 # =============================================================================
 # LEGACY COMPATIBILITY (maintain old targets)

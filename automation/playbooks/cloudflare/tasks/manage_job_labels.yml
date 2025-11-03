@@ -1,151 +1,71 @@
 ---
 # Manage AWX Job Labels Task
-# Creates and applies labels to AWX jobs based on the action being performed
+# Creates and applies labels to AWX jobs in the format "action:ticket_number"
 
-- name: Determine action label based on cf_action
+- name: Create combined action:ticket label
   set_fact:
-    action_label: >-
-      {%- if cf_action == 'create_record' -%}
-        CREATE
-      {%- elif cf_action == 'update_record' -%}
-        UPDATE
-      {%- elif cf_action == 'delete_record' -%}
-        DELETE
-      {%- elif cf_action == 'clone_record' -%}
-        CLONE
-      {%- elif cf_action == 'create_domain' -%}
-        CREATE-DOMAIN
-      {%- elif cf_action == 'update_settings' -%}
-        UPDATE-SETTINGS
-      {%- elif cf_action == 'sync' -%}
-        SYNC
-      {%- else -%}
-        {{ cf_action | upper | default('UNKNOWN') }}
-      {%- endif -%}
+    combined_label: "{{ cf_action }}:{{ survey_ticket_number | default(ticket_number | default('NO-TICKET')) }}"
 
-- name: Create action-specific label via API
+- name: Create combined label via API
   uri:
-    url: "http://localhost:8052/api/v2/labels/"
+    url: "http://localhost:8080/api/v2/labels/"
     method: POST
     headers:
       Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
       Content-Type: "application/json"
     body_format: json
     body:
-      name: "{{ action_label }}"
+      name: "{{ combined_label }}"
       organization: 1
     return_content: true
     validate_certs: false
     status_code: [200, 201, 400]
-  register: action_label_result
+  register: combined_label_result
   ignore_errors: true
 
-- name: Create record type label (if applicable)
+- name: Apply combined label to current job
   uri:
-    url: "http://localhost:8052/api/v2/labels/"
+    url: "http://localhost:8080/api/v2/jobs/{{ tower_job_id }}/labels/"
     method: POST
     headers:
       Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
       Content-Type: "application/json"
     body_format: json
     body:
-      name: "{{ record_type | upper }}"
-      organization: 1
-    return_content: true
+      id: "{{ combined_label_result.json.id }}"
     validate_certs: false
-    status_code: [200, 201, 400]
-  register: type_label_result
+    status_code: [200, 201, 204, 400]
+  register: job_combined_label_apply_result
   when: 
-    - record_type is defined
-    - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
+    - tower_job_id is defined
+    - combined_label_result is defined
+    - combined_label_result.json is defined
+    - combined_label_result.json.id is defined
   ignore_errors: true
 
-- name: Create domain label
-  uri:
-    url: "http://localhost:8052/api/v2/labels/"
-    method: POST
-    headers:
-      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      name: "{{ resolved_domain | upper | replace('.', '-') }}"
-      organization: 1
-    return_content: true
-    validate_certs: false
-    status_code: [200, 201, 400]
-  register: domain_label_result
-  when: 
-    - resolved_domain is defined
-    - resolved_domain | length > 0
-    - resolved_domain != 'undefined'
-  ignore_errors: true
+- name: Create job tags for UI visibility
+  set_fact:
+    job_tags_list: 
+      - "CLOUDFLARE"
+      - "{{ combined_label }}"
 
-- name: Display label creation results
+- name: Set job tags as comma-separated string
+  set_fact:
+    job_tags_string: "{{ job_tags_list | join(',') }}"
+
+- name: Display job identification tags
   debug:
-    msg: "Labels applied: {{ action_label }}{{ ', ' + record_type | upper if record_type is defined and cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record'] else '' }}{{ ', ' + resolved_domain | upper | replace('.', '-') if resolved_domain is defined and resolved_domain | length > 0 and resolved_domain != 'undefined' else '' }}"
+    msg:
+      - "JOB IDENTIFICATION TAGS"
+      - "════════════════════════════════════════════════════════════"
+      - "Combined Label: {{ combined_label }}"
+      - "Platform: CLOUDFLARE"
+      - "Full Tags: {{ job_tags_string }}"
+      - "════════════════════════════════════════════════════════════"
+      - "This combined label shows both action and ticket number"
 
-- name: Apply labels to current job
-  uri:
-    url: "http://localhost:8052/api/v2/jobs/{{ tower_job_id }}/labels/"
-    method: POST
-    headers:
-      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      id: "{{ action_label_result.json.id }}"
-    validate_certs: false
-    status_code: [200, 201, 204, 400]
-  register: job_label_apply_result
-  when: 
-    - tower_job_id is defined
-    - action_label_result is defined
-    - action_label_result.json is defined
-    - action_label_result.json.id is defined
-  ignore_errors: true
-
-- name: Apply record type label to current job
-  uri:
-    url: "http://localhost:8052/api/v2/jobs/{{ tower_job_id }}/labels/"
-    method: POST
-    headers:
-      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      id: "{{ type_label_result.json.id }}"
-    validate_certs: false
-    status_code: [200, 201, 204, 400]
-  register: job_type_label_apply_result
-  when: 
-    - tower_job_id is defined
-    - type_label_result is defined
-    - type_label_result.json is defined
-    - type_label_result.json.id is defined
-    - record_type is defined
-    - cf_action in ['create_record', 'update_record', 'delete_record', 'clone_record']
-  ignore_errors: true
-
-- name: Apply domain label to current job
-  uri:
-    url: "http://localhost:8052/api/v2/jobs/{{ tower_job_id }}/labels/"
-    method: POST
-    headers:
-      Authorization: "Basic {{ (awx_username | default('admin') + ':' + awx_password) | b64encode }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      id: "{{ domain_label_result.json.id }}"
-    validate_certs: false
-    status_code: [200, 201, 204, 400]
-  register: job_domain_label_apply_result
-  when: 
-    - tower_job_id is defined
-    - domain_label_result is defined
-    - domain_label_result.json is defined
-    - domain_label_result.json.id is defined
-    - resolved_domain is defined
-    - resolved_domain | length > 0
-    - resolved_domain != 'undefined'
-  ignore_errors: true
+- name: Display applied labels summary
+  debug:
+    msg: 
+      - "Job Label Applied:"
+      - "  Combined: {{ combined_label }}"

@@ -171,18 +171,33 @@
 
     - name: Display execution summary
       debug:
-        msg: |
-          
-          CLOUDFLARE AUTOMATION SUMMARY
-          ════════════════════════════════════════════════════════════
-          Action: {{ cf_action | upper | default('NONE') }} | Domain: {{ resolved_domain | default('N/A') }}{% if settings_level is defined %} | Settings Level: {{ settings_level | upper }}{% endif %}
-          
-          Domain Changes: {{ domain_changes | length }} operation(s){% if domain_changes | length > 0 %}
-          {% for change in domain_changes %}  ✓ {{ change.get('action', 'undefined') | replace('_', ' ') | title }} - {{ change.get('record', 'N/A') }} ({{ change.get('type', 'N/A') }}){% endfor %}{% endif %}
-          
-          Global Changes: {{ global_changes | length }} setting(s){% if global_changes | length > 0 %}
-          {% for change in global_changes %}  ✓ {{ change.get('setting', 'undefined') }} = {{ change.get('value', 'N/A') }}{% endfor %}{% endif %}
-          
-          Platform Changes: {{ platform_changes | length }} operation(s){% if platform_changes | length > 0 %}
-          {% for change in platform_changes %}  ✓ {{ change.get('action', 'undefined') }}{% endfor %}{% endif %}
-          ════════════════════════════════════════════════════════════
+        msg:
+          - " CLOUDFLARE AUTOMATION SUMMARY"
+          - "   Action: {{ cf_action | upper | default('NONE') }}"
+          - "   Domain: {{ resolved_domain | default('N/A') }}"
+          - "   Ticket: {{ survey_ticket_number | default(ticket_number | default('N/A')) }}"
+        
+          - " OPERATION RESULTS:"
+
+          - "   Domain Changes: {{ domain_changes | length }} operation(s)"
+          - "   Global Changes: {{ global_changes | length }} setting(s)"
+          - "   Platform Changes: {{ platform_changes | length }} operation(s)"
+       
+
+    - name: Display domain changes details
+      debug:
+        msg: "   SUCCESS: {{ item.get('action', 'undefined') | replace('_', ' ') | title }} - {{ item.get('record', 'N/A') }} ({{ item.get('type', 'N/A') }})"
+      loop: "{{ domain_changes }}"
+      when: domain_changes | length > 0
+
+    - name: Display global changes details
+      debug:
+        msg: "   SETTING: {{ item.get('setting', 'undefined') }} = {{ item.get('value', 'N/A') }}"
+      loop: "{{ global_changes }}"
+      when: global_changes | length > 0
+
+    - name: Display platform changes details
+      debug:
+        msg: "   PLATFORM: {{ item.get('action', 'undefined') }}"
+      loop: "{{ platform_changes }}"
+      when: platform_changes | length > 0

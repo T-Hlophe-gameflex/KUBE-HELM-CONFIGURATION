@@ -298,7 +298,7 @@
         validate_certs: "{{ cf_validate_certs | default(true) }}"
       register: clone_result
       when: clone_payload_json is defined
-      ignore_errors: yes
+      ignore_errors: true
 
     - name: Read payload file for debugging (when error occurs)
       slurp:
@@ -307,7 +307,7 @@
       when:
         - clone_result is defined
         - not (clone_result.json.success | default(false))
-      ignore_errors: yes
+      ignore_errors: true
 
     - name: Display payload that caused error
       debug:
@@ -486,7 +486,7 @@
     - cf_action in ['create_record','update_record']
     - operation_completed is not defined or not operation_completed
   register: record_result
-  ignore_errors: yes
+  ignore_errors: true
 
 - name: Fallback to curl if uri failed
   shell: >-
