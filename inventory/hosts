@@ -1,2 +1,16 @@
-[local]
-localhost ansible_connection=local ansible_python_interpreter=/usr/bin/python3
+[linux]
+
+[linux:children]
+ansible
+cloudflare
+
+[ansible]
+localhost ansible_connection=local
+
+[cloudflare]
+test-cloudflare-manager ansible_host=localhost ansible_connection=local
+
+[all:vars]
+datacenter_code=test
+datacenter_name=TEST
+environment_type=testing
